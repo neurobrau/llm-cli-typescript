@@ -26,6 +26,23 @@ Importing any non-entry module prints nothing and registers no listeners; the ve
 - Because the test tree is emitted one level deeper (`.test-dist/src/`), `version.ts` walks up to the nearest `package.json` instead of using a fixed relative path.
 - ESLint uses a flat config with `typescript-eslint` strict type-checked and stylistic rules. `no-floating-promises` applies to tests as well. `describe()`/`it()` registrations return runner-tracked promises, so they are marked with the `void` operator; promises inside test bodies stay checked.
 
+## Domain contracts and settings resolution (Task 002)
+
+Internal only; no CLI flag uses them yet.
+
+- `src/domain/generation.ts`: `Message`, `TokenUsage`, `GenerationRequest` (immutable snapshot via `snapshotRequest`), `GenerationOutcome` (`completed` | `incomplete`), `StreamEvent` (text, reasoning, completed, incomplete, failed).
+- `src/domain/errors.ts`: `ProviderError` with kinds api(1), missing_api_key(3), authentication(4), rate_limit(5), timeout(6), connection(7); `SettingsError` (exit 2 at the future CLI boundary); `AbortError` helpers (cancellation, 130, is never a `ProviderError`). Messages given to `ProviderError` must already be safe: adapters must normalize and redact upstream text.
+- `src/domain/provider.ts`: `Provider` interface. Every async method takes an `AbortSignal`; `generate` returns a `GenerationOutcome`, `stream` returns an `AsyncIterable<StreamEvent>`.
+- `src/domain/settings.ts` and `src/application/resolve-settings.ts`: `resolveSettings(input)` is pure (no I/O, environment, cache or mutation). Capabilities and saved preferences are supplied by the caller.
+
+**Counts are `bigint`.** Absent means not reported, `0n` reported zero; nothing is inferred. Counts above 2^53 stay exact. No JSON codec exists yet.
+
+**Stream lifecycle.** Full consumption yields deltas and exactly one terminal event, then ends. Early `return()` releases resources without a terminal event. Cancellation throws `AbortError` (also for an already-aborted signal) and never invents usage. No production stream validator exists yet.
+
+**Provenance and model default.** Each resolved setting records `source` (`cli`, `saved`, `builtin`) and `explicit`. Reasoning `effort` absent means the parameter is omitted; with `explicit: true` that is the user's "model default" choice (Go-style provenance), not a lost bit. A built-in default (`explicit: false`, e.g. `none`) may later be retried without the parameter if rejected; a user choice must not be dropped. Saved max tokens `null` is an explicit model default (omitted but `explicit: true`); absent is a built-in omission. Precedence: CLI, saved, built-in; a successful CLI value produces no notice about the overridden saved value. Strict mode throws `SettingsError` for unusable CLI values; lenient mode adds a notice and falls back to the saved value, then the built-in one.
+
+**Test-only fake.** `tests/helpers/fake-provider.ts` implements `Provider` with scripted outcomes and events, deferred-promise gates and abort-listener accounting. It is not a production module.
+
 ## Future separation
 
 Planned, created only when real code needs them: `src/domain/` (messages, usage, settings), `src/providers/` (OpenAI/Ollama adapters), `src/application/` (engine, sessions, request lifecycle with `AbortController`), `src/storage/` (codecs, paths, atomic writes), `src/ui/`, `src/pricing/`. Domain code will not import provider SDKs, the filesystem, or a TUI. See `docs/architecture-roadmap.md` for the full analysis.

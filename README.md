@@ -16,6 +16,10 @@ npm run build
 
 `npm run build` cleans `dist/` and `.test-dist/` and compiles `src/` with `tsc` to ordinary ESM JavaScript. `src/cli.ts` becomes `dist/cli.js`. Nothing is installed globally and no `PATH` or shell profile changes are needed.
 
+## Internal foundation (not yet exposed)
+
+`src/domain/` and `src/application/` hold provider-independent contracts (messages, bigint token usage, request snapshots, stream events, normalized `ProviderError`, the `Provider` interface) and a pure settings resolver. They are internal and tested only: the CLI still supports just help and version, and no providers exist. See `docs/architecture.md`.
+
 ## Usage
 
 ```sh
