@@ -23,6 +23,13 @@ const NO_REASONING: ModelCapabilities = {
   reasoning: { known: false, values: [], allowsModelDefault: true },
 };
 
+/** Always rejects with our AbortError, never with an arbitrary `signal.reason`. */
+function ensureNotAborted(signal: AbortSignal): void {
+  if (signal.aborted) {
+    throw createAbortError();
+  }
+}
+
 /** Deterministic test-only provider. No timers, no I/O. */
 export class FakeProvider implements Provider {
   readonly id: ProviderId = "openai";
@@ -43,9 +50,10 @@ export class FakeProvider implements Provider {
   }
 
   async generate(request: GenerationRequest, signal: AbortSignal): Promise<GenerationOutcome> {
-    signal.throwIfAborted();
+    ensureNotAborted(signal);
     this.requests.push(snapshotRequest(request));
     await this.pending(signal);
+    ensureNotAborted(signal); // an abort may arrive across the await
     const { outcome } = this.script;
     if (outcome instanceof ProviderError) {
       throw outcome;
@@ -62,11 +70,12 @@ export class FakeProvider implements Provider {
       }
     };
     try {
-      signal.throwIfAborted();
+      ensureNotAborted(signal);
       this.requests.push(snapshotRequest(request));
       await this.pending(signal);
+      ensureNotAborted(signal); // an abort may arrive across the await
       for (const event of this.script.events ?? []) {
-        signal.throwIfAborted();
+        ensureNotAborted(signal);
         yield event;
       }
     } finally {
@@ -75,23 +84,31 @@ export class FakeProvider implements Provider {
   }
 
   async listModels(signal: AbortSignal): Promise<readonly ModelInfo[]> {
-    signal.throwIfAborted();
-    return Promise.resolve(this.script.models ?? []);
+    ensureNotAborted(signal);
+    await Promise.resolve();
+    ensureNotAborted(signal);
+    return this.script.models ?? [];
   }
 
   async checkAvailability(signal: AbortSignal): Promise<Availability> {
-    signal.throwIfAborted();
-    return Promise.resolve(this.script.availability ?? { available: true, message: "" });
+    ensureNotAborted(signal);
+    await Promise.resolve();
+    ensureNotAborted(signal);
+    return this.script.availability ?? { available: true, message: "" };
   }
 
   async defaultModel(signal: AbortSignal): Promise<string> {
-    signal.throwIfAborted();
-    return Promise.resolve(this.script.defaultModel ?? "fake-model");
+    ensureNotAborted(signal);
+    await Promise.resolve();
+    ensureNotAborted(signal);
+    return this.script.defaultModel ?? "fake-model";
   }
 
   async getCapabilities(_model: string, signal: AbortSignal): Promise<ModelCapabilities> {
-    signal.throwIfAborted();
-    return Promise.resolve(this.script.capabilities ?? NO_REASONING);
+    ensureNotAborted(signal);
+    await Promise.resolve();
+    ensureNotAborted(signal);
+    return this.script.capabilities ?? NO_REASONING;
   }
 
   /** Waits for the gate or an abort; always removes its abort listener. */

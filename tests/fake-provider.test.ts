@@ -149,4 +149,68 @@ void describe("FakeProvider", () => {
     assert.equal(provider.streamCleanups, 1);
     assert.equal((await iterator.next()).done, true);
   });
+
+  void it("rejects when aborted immediately after a call without a gate", async () => {
+    const outcome = { kind: "completed", result: { text: "x" } } as const;
+    const provider = new FakeProvider({ outcome, models: [], defaultModel: "m" });
+    const calls: readonly ((signal: AbortSignal) => Promise<unknown>)[] = [
+      (signal) => provider.generate(request, signal),
+      (signal) => provider.listModels(signal),
+      (signal) => provider.checkAvailability(signal),
+      (signal) => provider.defaultModel(signal),
+      (signal) => provider.getCapabilities("m", signal),
+      (signal) => collect(provider.stream(request, signal)),
+    ];
+    for (const call of calls) {
+      const controller = new AbortController();
+      const pending = call(controller.signal);
+      controller.abort(); // before the result is awaited
+      await assert.rejects(pending, isAbortError);
+    }
+    assert.equal(provider.activeAbortListeners, 0);
+  });
+
+  void it("stops a stream when aborted between events and cleans up once", async () => {
+    const provider = new FakeProvider({
+      events: [
+        { kind: "text", text: "a" },
+        { kind: "completed", result: { text: "a" } },
+      ],
+    });
+    const controller = new AbortController();
+    const iterator = provider.stream(request, controller.signal);
+    assert.deepEqual((await iterator.next()).value, { kind: "text", text: "a" });
+    controller.abort();
+    await assert.rejects(iterator.next(), isAbortError);
+    assert.equal(provider.streamCleanups, 1);
+  });
+
+  void it("normalizes custom abort reasons to AbortError across all methods", async () => {
+    const reasons: readonly unknown[] = [new Error("custom"), "a string", 42, undefined, new ProviderError("x", "timeout")];
+    for (const reason of reasons) {
+      const aborted = new AbortController();
+      aborted.abort(reason);
+      const provider = new FakeProvider();
+      const rejections = [
+        provider.generate(request, aborted.signal),
+        provider.listModels(aborted.signal),
+        provider.checkAvailability(aborted.signal),
+        provider.defaultModel(aborted.signal),
+        provider.getCapabilities("m", aborted.signal),
+        collect(provider.stream(request, aborted.signal)),
+      ];
+      for (const rejection of rejections) {
+        await assert.rejects(rejection, (error: unknown) => isAbortError(error) && !(error instanceof ProviderError));
+      }
+
+      // Abort with a custom reason while an operation is pending.
+      const gated = new FakeProvider({ gate: deferred() });
+      const controller = new AbortController();
+      const pending = gated.generate(request, controller.signal);
+      await gated.reachedPending;
+      controller.abort(reason);
+      await assert.rejects(pending, (error: unknown) => isAbortError(error) && error !== reason);
+      assert.equal(gated.activeAbortListeners, 0);
+    }
+  });
 });
