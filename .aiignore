@@ -1,0 +1,14 @@
+# Advisory only: supported patterns depend on the coding agent.
+# AGENTS.md is the authoritative project instruction file.
+# Do not exclude .agent-tasks/: the agent must read the active task.
+.git/
+node_modules/
+dist/
+.test-dist/
+coverage/
+*.tsbuildinfo
+.env
+.env.*
+*.pem
+*.key
+*.log

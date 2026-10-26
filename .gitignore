@@ -1,0 +1,26 @@
+# Installed packages and generated output
+node_modules/
+dist/
+.test-dist/
+coverage/
+*.tsbuildinfo
+
+# Local agent tasks, prompts, reports, and scratch notes
+.agent-tasks/
+
+# Secrets and local settings
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+.npmrc.local
+
+# Logs, OS, and editor files
+*.log
+.DS_Store
+*~
+*.swp
+*.swo
+.idea/
+.vscode/
