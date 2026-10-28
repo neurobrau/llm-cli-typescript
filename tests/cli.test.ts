@@ -35,11 +35,11 @@ after(async () => {
   await rm(scratch, { recursive: true, force: true });
 });
 
-function runNode(args: readonly string[], cwd: string): Promise<Result> {
+function runNode(args: readonly string[], cwd: string, extraEnv: NodeJS.ProcessEnv = {}): Promise<Result> {
   return new Promise<Result>((resolvePromise, reject) => {
     const child = spawn(process.execPath, [...args], {
       cwd,
-      env: childEnv,
+      env: { ...childEnv, ...extraEnv },
       stdio: ["ignore", "pipe", "pipe"],
       timeout: TIMEOUT_MS,
       killSignal: "SIGKILL",
@@ -60,8 +60,8 @@ function runNode(args: readonly string[], cwd: string): Promise<Result> {
   });
 }
 
-function runCli(args: readonly string[], cwd = ROOT): Promise<Result> {
-  return runNode([CLI, ...args], cwd);
+function runCli(args: readonly string[], cwd = ROOT, extraEnv: NodeJS.ProcessEnv = {}): Promise<Result> {
+  return runNode([CLI, ...args], cwd, extraEnv);
 }
 
 function packageVersion(): string {
@@ -103,13 +103,13 @@ void describe("built CLI (dist/cli.js)", () => {
   void it("rejects invalid invocations with exit 2 and empty stdout", async () => {
     const cases: readonly { args: readonly string[]; pattern: RegExp }[] = [
       { args: ["--bogus"], pattern: /unknown option "--bogus"/ },
-      { args: ["hello"], pattern: /prompt mode is not implemented/ },
-      { args: [""], pattern: /prompt mode is not implemented/ },
+      { args: [""], pattern: /prompt must not be empty/ },
       { args: ["a", "b"], pattern: /unsupported positional arguments/ },
+      { args: ["--usage"], pattern: /prompt is required/ },
+      { args: ["--provider", "ollama", "p"], pattern: /unsupported provider "ollama"/ },
       { args: ["--help", "--version"], pattern: /conflicting options/ },
       { args: ["--version", "x"], pattern: /invalid invocation/ },
       { args: ["--version=foo"], pattern: /invalid argument/ },
-      { args: ["--provider", "openai"], pattern: /unsupported option "--provider"/ },
       { args: ["--stream"], pattern: /unsupported option "--stream"/ },
     ];
     for (const { args, pattern } of cases) {
@@ -122,11 +122,30 @@ void describe("built CLI (dist/cli.js)", () => {
     }
   });
 
-  void it("treats arguments after -- as prompt text", async () => {
+  void it("treats arguments after -- as prompt text, not as a version request", async () => {
+    // No key in the sanitized environment: the prompt reaches the provider and fails on the missing key.
     const result = await runCli(["--", "--version"]);
-    assert.equal(result.code, 2);
+    assert.equal(result.code, 3);
     assert.equal(result.stdout, "");
-    assert.match(result.stderr, /prompt mode is not implemented/);
+    assert.match(result.stderr, /OPENAI_API_KEY is not set/);
+  });
+
+  void it("reports a missing or blank key (exit 3) without any network use", async () => {
+    const result = await runCli(["hello"]);
+    assert.equal(result.code, 3);
+    assert.equal(result.stdout, "");
+    assert.equal(result.stderr, "neurobrau: error: OPENAI_API_KEY is not set. Export it in your environment and try again.\n");
+    const blank = await runCli(["hello"], ROOT, { OPENAI_API_KEY: "  \t " });
+    assert.equal(blank.code, 3);
+  });
+
+  void it("does not read credentials for help, version or invalid invocations", async () => {
+    // A key that would be rejected loudly if used; none of these invocations may touch it.
+    const env = { OPENAI_API_KEY: "sk-synthetic-not-used-000000" };
+    for (const args of [[], ["--version"], ["--bogus"], ["--provider", "ollama", "p"], ["--usage"]]) {
+      const result = await runCli(args, ROOT, env);
+      assert.ok(!result.stdout.includes("sk-synthetic") && !result.stderr.includes("sk-synthetic"));
+    }
   });
 });
 

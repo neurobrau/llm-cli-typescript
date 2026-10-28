@@ -55,13 +55,15 @@ void describe("run", () => {
   void it("reports invalid invocations on stderr with exit code 2", async () => {
     const cases: readonly (readonly string[])[] = [
       ["--bogus"],
-      ["prompt"],
       [""],
+      ["   "],
       ["a", "b"],
+      ["--usage"],
+      ["--stream", "p"],
+      ["--provider", "ollama", "p"],
       ["--help", "--version"],
       ["--version", "x"],
       ["--version=foo"],
-      ["--provider", "openai"],
     ];
     for (const argv of cases) {
       const { io, out, err } = capture();

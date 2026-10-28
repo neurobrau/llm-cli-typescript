@@ -66,3 +66,10 @@ export function createAbortError(message = "The operation was aborted"): Error {
 export function isAbortError(error: unknown): boolean {
   return error instanceof Error && error.name === "AbortError";
 }
+
+/** Throws an AbortError if the signal is aborted, regardless of `signal.reason`. */
+export function ensureNotAborted(signal: AbortSignal): void {
+  if (signal.aborted) {
+    throw createAbortError();
+  }
+}

@@ -1,6 +1,6 @@
 # Architecture
 
-Status: bootstrap (`0.1.0-dev`). Only the CLI skeleton exists.
+Status: `0.1.0-dev`. CLI skeleton, internal domain contracts, and a non-streaming OpenAI one-shot path exist.
 
 ## CLI composition
 
@@ -28,7 +28,7 @@ Importing any non-entry module prints nothing and registers no listeners; the ve
 
 ## Domain contracts and settings resolution (Task 002)
 
-Internal only; no CLI flag uses them yet.
+Used by the one-shot path below.
 
 - `src/domain/generation.ts`: `Message`, `TokenUsage`, `GenerationRequest` (immutable snapshot via `snapshotRequest`), `GenerationOutcome` (`completed` | `incomplete`), `StreamEvent` (text, reasoning, completed, incomplete, failed).
 - `src/domain/errors.ts`: `ProviderError` with kinds api(1), missing_api_key(3), authentication(4), rate_limit(5), timeout(6), connection(7); `SettingsError` (exit 2 at the future CLI boundary); `AbortError` helpers (cancellation, 130, is never a `ProviderError`). Messages given to `ProviderError` must already be safe: adapters must normalize and redact upstream text.
@@ -42,6 +42,37 @@ Internal only; no CLI flag uses them yet.
 **Provenance and model default.** Each resolved setting records `source` (`cli`, `saved`, `builtin`) and `explicit`. Reasoning `effort` absent means the parameter is omitted; with `explicit: true` that is the user's "model default" choice (Go-style provenance), not a lost bit. A built-in default (`explicit: false`, e.g. `none`) may later be retried without the parameter if rejected; a user choice must not be dropped. Saved max tokens `null` is an explicit model default (omitted but `explicit: true`); absent is a built-in omission. Precedence: CLI, saved, built-in; a successful CLI value produces no notice about the overridden saved value. Strict mode throws `SettingsError` for unusable CLI values; lenient mode adds a notice and falls back to the saved value, then the built-in one.
 
 **Test-only fake.** `tests/helpers/fake-provider.ts` implements `Provider` with scripted outcomes and events, deferred-promise gates and abort-listener accounting. It is not a production module.
+
+## OpenAI one-shot (Task 003)
+
+`src/providers/openai/`:
+
+| File | Responsibility |
+| --- | --- |
+| `sdk.ts` | The only importer of the `openai` SDK (7.45.0, the sole production dependency). Exposes SDK-free `createResponse`/`listModels` returning decoded bodies, and `describeSdkError` (SDK error to plain `SdkFailure`). |
+| `convert.ts` | `buildParams` (request to API body) and `convertResponse` (raw `unknown` body to `GenerationOutcome`, validated field by field, no casts of wire data). |
+| `errors.ts` | `SdkFailure` to `ProviderError`, fixed/sanitized messages, `rejectsReasoning`. |
+| `redact.ts` | `safeText`: strips terminal controls, flattens, redacts the exact key and key-like strings, caps at 300 characters. |
+| `capabilities.ts` | Dated project compatibility table (copied from the Python reference; Go is identical), snapshot suffix lookup, non-text model markers, default model. |
+| `provider.ts` | `OpenAIProvider`: all six `Provider` methods. |
+
+`src/main.ts` runs the one-shot flow (`defaultModel`, `getCapabilities`, strict `resolveSettings` with empty saved preferences, `generate`) and maps outcomes to output and exit codes. `src/process-io.ts` holds the writer and SIGINT wiring; `src/cli.ts` is the production composition and the only place that reads `OPENAI_API_KEY` (lazily, through a `getApiKey` callback the provider invokes when an operation runs).
+
+**SDK configuration.** Client created lazily on the first operation; explicit `maxRetries: 0`; base URL, organization, project, admin key, webhook secret and log level set explicitly so ambient `OPENAI_*` variables are not inherited. The SDK still reads `OPENAI_CUSTOM_HEADERS` from the environment and has no option to disable it (checked in 7.45.0), so the adapter's `fetch` wrapper rebuilds request headers from an allowlist (SDK-set headers only). `baseURL` and `fetch` are programmatic test seams, not flags or environment variables.
+
+**Request.** `POST /responses` with `model`, `input` (ordered user/assistant text), `store: false`, and, only when chosen, `instructions`, `reasoning: {effort}` and `max_output_tokens`. No tools, background, conversation IDs, `previous_response_id`, cache retention or temperature. `store: false` is not a zero-retention promise.
+
+**Response policy.** Answer text is the ordered `output_text` parts of message items (never reasoning, tool or refusal content), preserved exactly. `completed` with text: completed. `incomplete`: incomplete outcome (partial text, usage, tier; reasons translated as in the references). Refusal without text, completed with empty text, `failed`, `cancelled`, `queued`, `in_progress`, missing/unknown status, and malformed payloads: API error. Usage counts are accepted only as non-negative safe integers and become `bigint`; fractional, negative, non-numeric and beyond-2^53 values are treated as not reported, because the SDK has already decoded JSON into rounded numbers and `BigInt(number)` cannot restore them. No totals are synthesized.
+
+**Errors.** 401/403 authentication (4), 429 rate limit (5), 408 or SDK timeout (6), connection failure (7), everything else API (1). Local abort wins over every classification and always becomes `AbortError`, whatever `signal.reason` was. The adapter's own deadline timer also covers reading the response body; a deadline expiry is a timeout, not a cancellation.
+
+**Implicit reasoning fallback.** The only semantic retry: a concrete built-in (non-explicit) effort rejected with HTTP 400 whose structured `error.param` is `reasoning` or a `reasoning.` subfield is retried once with the field omitted (cancellation checked first; everything else identical). The model is then remembered in that provider instance: later implicit calls omit reasoning and `getCapabilities` reports known/no values, but a later explicit choice is still sent and its rejection reported. Generic 400s, messages mentioning "reasoning", 401/429/5xx, timeouts and connection failures are never retried.
+
+**Cancellation.** The caller's signal is combined with a deadline in a per-call controller; its listener and timer are removed in `finally`. The signal is rechecked after every await before conversion, cache writes or fallback. `SIGINT` is registered only while a prompt runs (`InterruptSource`), aborts the request, waits at most 2 s for it to settle, prints `neurobrau: interrupted`, and exits 130.
+
+**Discovery.** `listModels` (5 s timeout, no retries) reads the Models endpoint's single unpaginated list, keeps valid non-empty IDs without the non-text markers, deduplicates, sorts and caches only successes per provider instance. `checkAvailability` reuses it. Neither is used by one-shot. There is no CLI surface for discovery.
+
+**Streaming** is not implemented: `stream()` lazily yields one normalized failed event ("OpenAI streaming is not implemented yet.") without key access or network. Multi-turn reasoning-item replay needs a separate design; the domain and history models are unchanged.
 
 ## Future separation
 
