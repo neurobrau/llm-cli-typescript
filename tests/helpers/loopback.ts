@@ -54,6 +54,11 @@ export class Loopback {
     return loopback;
   }
 
+  /** `http://127.0.0.1:PORT` without the OpenAI-style path prefix. */
+  get origin(): string {
+    return new URL(this.url).origin;
+  }
+
   /** Queues responders, one per expected request, in order. */
   expect(...responders: Responder[]): void {
     this.queue.push(...responders);

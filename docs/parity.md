@@ -2,14 +2,14 @@
 
 ## Current scope and limitations
 
-`0.1.0-dev` implements `-h`/`--help`, `--version` and a non-streaming OpenAI one-shot prompt. Not implemented: Ollama, chat, history and settings storage, streaming (`--stream` is rejected), pricing, model-discovery commands, terminal UI, `--plain`, `--no-history`, `--transcript-on-exit`. Exit codes 1-8, 130 and 141 are produced for the one-shot path.
+`0.1.0` implements `-h`/`--help`, `--version` and a non-streaming one-shot prompt for OpenAI and Ollama (`--provider openai|ollama`). Not implemented: chat, history and settings storage, streaming (`--stream` is rejected), pricing, model-discovery commands, terminal UI, `--plain`, `--no-history`, `--transcript-on-exit`. Exit codes 1-8, 130 and 141 are produced for the one-shot path.
 
 ## References
 
 - Python (primary behavior reference): `0a6d045c022b850371a1c51a1df30f11d9d4c60e`
 - Go: `b064decc66cad7d9656488bdf7749650b52cf309`
 
-Both are read-only. The Go version constant (`0.4.0-dev`) and the Python version are independent of this edition's `0.1.0-dev`.
+Both are read-only. The Go version constant (`0.4.0-dev`) and the Python version are independent of this edition's `0.1.0` (version plan in `docs/architecture.md`).
 
 ## Settings resolution (Task 002, internal)
 
@@ -38,6 +38,22 @@ References: Python `openai_provider.py`, `preferences.py`, `formatting.py`, CLI 
 - Cancellation always normalizes to `AbortError`/exit 130 (Go reports a failed event wrapping `context.Canceled`).
 - The SDK differs from the Python/Go ones: `OPENAI_CUSTOM_HEADERS` cannot be disabled by option and is filtered by a header allowlist; the models list is a single page.
 - Live parity against the Python/Go implementations is not part of this task; all behavior is covered by tests that use the real SDK against a loopback server with a synthetic key.
+
+## Ollama one-shot differences (Task 004)
+
+References: Python `providers/ollama_provider.py`, `tests/test_ollama_provider.py`, `docs/tui-spec.md` §§12-16; Go `internal/ollama/{http,ollama,parse}.go`. Official docs consulted: docs.ollama.com `api/chat`, `api/tags`, `capabilities/thinking` (they do not document `capabilities` or `context_length` in tags; the references' fields are supported alongside).
+
+- Transport: Node `http`/`https` with a fresh agent per request; always direct, proxy variables never apply (Python bypasses proxies only for loopback; Go relies on `ProxyFromEnvironment`). One deadline covers the whole exchange including body reads (Python's timeout is per socket operation).
+- `OLLAMA_HOST` is validated: userinfo, query/fragment, non-http(s) schemes and bad ports/hosts/paths are a settings error (exit 2). The references accept or silently reinterpret them. Explicit URL ports are kept as written; only a missing port becomes 11434.
+- Cloud-like IDs are refused before any request, even when not installed (references look up tags first). A confirmed-capabilities model without `completion` is refused for explicit selection (Python/Go only hide it from lists).
+- Model default for named-level models omits `think` (Go; Python sends `false`). Off/on models keep no selectable model default. `[false]` metadata means no thinking. Unknown support sends nothing by default; an explicit value passes through (`none`/`off`→`false`, `on`→`true`, else the exact string).
+- Show capabilities are consulted only when tags omit them or report `thinking`; tags capabilities without `thinking` need no show request (Go always calls show). A refresh invalidates show data of changed models.
+- `done` must be `true` (Python accepts a missing `done` in non-streaming replies); an `error` field is a failure even beside a message; an unterminated leading think block is never an answer (Python's regex leaves it in the text; Go matches this policy). Empty completed answers are allowed (the OpenAI adapter rejects them).
+- Counts: exact `bigint` for non-negative safe integers, others absent; the total is the exact sum only when both counts exist (Go/Python: same rule, plain integers).
+- Timing counters (durations, load) are ignored in one-shot; `done_reason:"length"` gives the references' reason text.
+- Diagnostics are control-stripped, single-line and capped at 300 characters (Python 200, Go 200 runes).
+- Connection errors name only the scheme, host and port, never the path prefix.
+- Concurrent use of one provider instance is unsupported (as in Go).
 
 ## Proposed future decisions (not implemented, not yet accepted by the owner)
 

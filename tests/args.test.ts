@@ -130,10 +130,13 @@ void describe("parseCliArgs: one-shot prompts", () => {
     }
   });
 
-  void it("accepts the openai provider and rejects ollama and others before any work", () => {
+  void it("accepts the openai and ollama providers (openai by default) and rejects others", () => {
+    assert.equal(invocation(["p"]).provider, "openai");
     assert.equal(invocation(["--provider", "openai", "p"]).provider, "openai");
-    assert.match(errorMessage(["--provider", "ollama", "p"]), /unsupported provider "ollama"/);
-    assert.match(errorMessage(["--provider", "other", "p"]), /invalid provider/);
+    assert.equal(invocation(["--provider", "ollama", "p"]).provider, "ollama");
+    assert.equal(invocation(["--provider=ollama", "--model", "qwen3.5:4b", "p"]).model, "qwen3.5:4b");
+    assert.match(errorMessage(["--provider", "other", "p"]), /invalid provider "other": expected openai or ollama/);
+    assert.match(errorMessage(["--provider", "Ollama", "p"]), /invalid provider/);
   });
 
   void it("rejects an empty model and options without a value", () => {

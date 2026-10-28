@@ -12,15 +12,16 @@ export function usageHint(): string {
 }
 
 export function helpText(version: string): string {
-  return `usage: ${PROGRAM_NAME} [-h] [--version] [--provider openai] [--model MODEL_ID]
+  return `usage: ${PROGRAM_NAME} [-h] [--version] [--provider PROVIDER] [--model MODEL_ID]
                  [--reasoning-effort EFFORT] [--max-output-tokens N]
                  [--answer-style STYLE] [--usage] prompt
 
-${EDITION} ${version} (development build)
+${EDITION} ${version}
 
-Sends one prompt to OpenAI (non-streaming) and prints the answer. Interactive
-chat, streaming, Ollama, history and saved settings are future work.
-Requires OPENAI_API_KEY in the environment for prompts.
+Sends one prompt to OpenAI or a local Ollama server (non-streaming) and prints
+the answer. Interactive chat, streaming, history and saved settings are future
+work. OpenAI requires OPENAI_API_KEY in the environment. Ollama needs no key;
+OLLAMA_HOST selects the server (default http://127.0.0.1:11434).
 
 positional arguments:
   prompt                     prompt text for a one-shot request
@@ -28,8 +29,9 @@ positional arguments:
 options:
   -h, --help                 show this help message and exit
   --version                  show program's version number and exit
-  --provider PROVIDER        LLM provider: openai (default; ollama is not available yet)
-  --model MODEL_ID           model identifier (default: gpt-6-luna)
+  --provider PROVIDER        LLM provider: openai (default) or ollama
+  --model MODEL_ID           model identifier (default: gpt-6-luna for openai,
+                             the first local model for ollama)
   --reasoning-effort EFFORT  none, minimal, low, medium, high, xhigh, max, or
                              model-default (send no effort; the model uses its
                              own default). Without it, none is used where

@@ -19,8 +19,9 @@ export interface Message {
 
 /**
  * Token counts exactly as reported. An absent field means "not reported";
- * `0n` means reported zero. Missing counts are never inferred. Counts are
- * non-negative bigints so storage is not forced into lossy JS numbers.
+ * `0n` means reported zero. Missing counts are never estimated: the only
+ * derived value is an adapter's exact sum of two reported counts (Ollama's
+ * total); OpenAI's absent total stays absent. Counts are non-negative bigints so storage is not forced into lossy JS numbers.
  * Cached-input and cache-write counts are parts of the input count; reasoning
  * tokens are part of the output count.
  */

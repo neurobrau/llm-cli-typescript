@@ -1,13 +1,14 @@
 import { parseArgs } from "node:util";
 
+import type { ProviderId } from "./domain/generation.js";
 import { ANSWER_STYLES, MODEL_DEFAULT, REASONING_EFFORTS } from "./domain/settings.js";
 import type { AnswerStyle, CliReasoning } from "./domain/settings.js";
 
 export const PROGRAM_NAME = "neurobrau";
 
-/** A validated one-shot request. Only OpenAI exists so far. */
+/** A validated one-shot request. */
 export interface PromptInvocation {
-  readonly provider: "openai";
+  readonly provider: ProviderId;
   readonly model?: string;
   readonly reasoning?: CliReasoning;
   readonly maxOutputTokens?: number;
@@ -152,10 +153,8 @@ type ValidatedSettings = Omit<PromptInvocation, "usage" | "prompt">;
 /** Validates option values; returns a diagnostic string on failure. */
 function validateValues(values: ReadonlyMap<ValueOption, string>): ValidatedSettings | string {
   const provider = values.get("provider");
-  if (provider !== undefined && provider !== "openai") {
-    return provider === "ollama"
-      ? 'unsupported provider "ollama": not implemented yet'
-      : `invalid provider ${quote(provider)}: expected openai`;
+  if (provider !== undefined && provider !== "openai" && provider !== "ollama") {
+    return `invalid provider ${quote(provider)}: expected openai or ollama`;
   }
   const model = values.get("model");
   if (model?.trim() === "") {
@@ -180,7 +179,7 @@ function validateValues(values: ReadonlyMap<ValueOption, string>): ValidatedSett
     return `invalid answer style ${quote(style)}: expected ${ANSWER_STYLES.join(", ")}`;
   }
   return {
-    provider: "openai",
+    provider: provider ?? "openai",
     ...(model === undefined ? {} : { model }),
     ...(reasoning === undefined ? {} : { reasoning }),
     ...(maxOutputTokens === undefined ? {} : { maxOutputTokens }),

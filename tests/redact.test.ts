@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
-import { safeText } from "../src/providers/openai/redact.js";
+import { safeText } from "../src/providers/redact.js";
 
 const SECRET = "synthetic-secret-value-123";
 

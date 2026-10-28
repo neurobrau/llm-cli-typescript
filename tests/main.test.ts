@@ -60,7 +60,7 @@ void describe("run", () => {
       ["a", "b"],
       ["--usage"],
       ["--stream", "p"],
-      ["--provider", "ollama", "p"],
+      ["--provider", "other", "p"],
       ["--help", "--version"],
       ["--version", "x"],
       ["--version=foo"],

@@ -1,6 +1,6 @@
 import { ProviderError } from "../../domain/errors.js";
 import { API_KEY_ENV_VAR } from "./capabilities.js";
-import { safeText } from "./redact.js";
+import { safeText } from "../redact.js";
 
 /** SDK-independent description of a failed request, produced at the SDK boundary. */
 export type SdkFailure =

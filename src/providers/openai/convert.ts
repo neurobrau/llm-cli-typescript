@@ -9,7 +9,7 @@ import type {
   TokenUsage,
 } from "../../domain/generation.js";
 import { apiError } from "./errors.js";
-import { safeText } from "./redact.js";
+import { safeText } from "../redact.js";
 
 /** Plain Responses API request body for a text-only, one-shot call. */
 export interface ResponseParams {

@@ -1,6 +1,6 @@
 {
   "name": "@neurobrau/llm-cli-typescript",
-  "version": "0.1.0-dev",
+  "version": "0.1.0",
   "private": true,
   "description": "NeuroBräu TypeScript — a terminal-based multi-provider LLM client",
   "type": "module",

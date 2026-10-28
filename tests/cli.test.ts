@@ -70,6 +70,19 @@ function packageVersion(): string {
 }
 
 void describe("built CLI (dist/cli.js)", () => {
+  void it("reports the one package.json version, which the lockfile agrees with and which is not a dev version", async () => {
+    const lock = JSON.parse(readFileSync(join(ROOT, "package-lock.json"), "utf8")) as {
+      version: string;
+      packages: Record<string, { version: string }>;
+    };
+    const version = packageVersion();
+    assert.equal(lock.version, version);
+    assert.equal(lock.packages[""]?.version, version);
+    assert.match(version, /^\d+\.\d+\.\d+$/);
+    assert.equal((await runCli(["--version"])).stdout, `NeuroBräu TypeScript CLI ${version}\n`);
+    assert.ok(!(await runCli(["--help"])).stdout.includes("-dev"));
+  });
+
   void it("is emitted at dist/cli.js, not dist/src/cli.js", () => {
     assert.ok(existsSync(CLI));
     assert.ok(!existsSync(join(ROOT, "dist", "src")));
@@ -106,7 +119,7 @@ void describe("built CLI (dist/cli.js)", () => {
       { args: [""], pattern: /prompt must not be empty/ },
       { args: ["a", "b"], pattern: /unsupported positional arguments/ },
       { args: ["--usage"], pattern: /prompt is required/ },
-      { args: ["--provider", "ollama", "p"], pattern: /unsupported provider "ollama"/ },
+      { args: ["--provider", "other", "p"], pattern: /invalid provider "other"/ },
       { args: ["--help", "--version"], pattern: /conflicting options/ },
       { args: ["--version", "x"], pattern: /invalid invocation/ },
       { args: ["--version=foo"], pattern: /invalid argument/ },
@@ -142,7 +155,7 @@ void describe("built CLI (dist/cli.js)", () => {
   void it("does not read credentials for help, version or invalid invocations", async () => {
     // A key that would be rejected loudly if used; none of these invocations may touch it.
     const env = { OPENAI_API_KEY: "sk-synthetic-not-used-000000" };
-    for (const args of [[], ["--version"], ["--bogus"], ["--provider", "ollama", "p"], ["--usage"]]) {
+    for (const args of [[], ["--version"], ["--bogus"], ["--provider", "other", "p"], ["--usage"]]) {
       const result = await runCli(args, ROOT, env);
       assert.ok(!result.stdout.includes("sk-synthetic") && !result.stderr.includes("sk-synthetic"));
     }

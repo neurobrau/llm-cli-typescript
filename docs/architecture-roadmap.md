@@ -42,7 +42,7 @@ Provider использует `generate(request, signal): Promise<GenerationOutc
 
 ## Сборка и зависимости
 
-Рекомендация: Node 24, npm с lockfile, native ESM, TypeScript NodeNext, обычный tsc без bundler. Запуск: `node dist/cli.js`. Bootstrap version `0.1.0-dev`; это ещё не полный milestone 0.1.0. Единственный источник версии — package.json.
+Рекомендация: Node 24, npm с lockfile, native ESM, TypeScript NodeNext, обычный tsc без bundler. Запуск: `node dist/cli.js`. Bootstrap version `0.1.0-dev`; это ещё не полный milestone 0.1.0. Единственный источник версии — package.json. (Обновление: Task 004 завершил milestone, версия теперь `0.1.0`; план версий в `docs/architecture.md`.)
 
 Встроенный node:test покрывает unit/integration и subprocess tests; TypeScript отдельно проверяет и source, и tests. ESLint с typescript-eslint — dev tools. Vitest удобен для UI-oriented тестов, но пока не даёт достаточного преимущества для ещё одной зависимости. Commander пригодится при сложном CLI с subcommands; текущих flags достаточно для util.parseArgs. Проверять CLI нужно через собранный JS, а не только через TS runner.
 

@@ -2,6 +2,7 @@ import { PROGRAM_NAME, parseCliArgs } from "./args.js";
 import type { PromptInvocation } from "./args.js";
 import { resolveSettings } from "./application/resolve-settings.js";
 import { EXIT_CANCELLED, ProviderError, SettingsError, exitCodeForKind, isAbortError } from "./domain/errors.js";
+import type { ProviderId } from "./domain/generation.js";
 import type { Provider } from "./domain/provider.js";
 import { styleInstructions } from "./domain/settings.js";
 import { formatUsage, helpText, usageHint, versionText } from "./help.js";
@@ -26,12 +27,14 @@ export interface InterruptSource {
 
 export interface RunDependencies {
   /**
-   * Creates the provider for a one-shot prompt. Must not read credentials
-   * or do I/O until an operation runs. Default: an OpenAI provider that has
-   * no key source, so prompts fail with a missing-key error; the executable
-   * composition supplies the real environment-backed factory.
+   * Creates the provider the user selected for a one-shot prompt. Called only
+   * for that provider, after argument validation. May throw a SettingsError
+   * for invalid configuration (exit 2). Must not do I/O or read credentials
+   * until an operation runs. Default: an OpenAI provider that has no key
+   * source (prompts fail with a missing-key error) and no Ollama at all; the
+   * executable composition supplies the real environment-backed factory.
    */
-  readonly createProvider?: () => Provider;
+  readonly createProvider?: (id: ProviderId) => Provider;
   readonly interrupt?: InterruptSource;
   /** Upper bound for waiting on an aborted operation to settle. Default 2000 ms. */
   readonly cleanupTimeoutMs?: number;
@@ -81,12 +84,12 @@ async function execute(argv: readonly string[], io: Io, deps: RunDependencies): 
 }
 
 async function runPrompt(invocation: PromptInvocation, io: Io, deps: RunDependencies): Promise<number> {
-  const provider = (deps.createProvider ?? defaultProvider)();
   const controller = new AbortController();
   const unregister = deps.interrupt?.register(() => {
     controller.abort();
   });
   try {
+    const provider = (deps.createProvider ?? defaultProvider)(invocation.provider);
     const operation = oneShot(invocation, provider, controller.signal);
     // After an interrupt, wait only a bounded time for the operation to settle.
     const outcome = await settleBounded(operation, controller.signal, deps.cleanupTimeoutMs ?? DEFAULT_CLEANUP_TIMEOUT_MS);
@@ -112,7 +115,11 @@ async function runPrompt(invocation: PromptInvocation, io: Io, deps: RunDependen
   }
 }
 
-function defaultProvider(): Provider {
+function defaultProvider(id: ProviderId): Provider {
+  if (id === "ollama") {
+    // Never reach a real server from a composition that was not given one.
+    throw new ProviderError("Ollama is not configured in this composition.", "api");
+  }
   return new OpenAIProvider({ getApiKey: () => undefined });
 }
 
