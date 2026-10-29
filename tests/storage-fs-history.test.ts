@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, it } from "node:test";
 
 import { isAbortError } from "../src/domain/errors.js";
+import { historyOwnedDirectories, tightenExisting } from "../src/storage/fs/directories.js";
 import { HistoryStore, nodeFs, StorageIoError, StoragePathError } from "../src/storage/fs/index.js";
 import { encodeActiveSelection, encodeConversation, matchesSelection } from "../src/storage/index.js";
 import type { StoredConversation } from "../src/storage/index.js";
@@ -225,6 +226,48 @@ void describe("history: directories and permissions", { skip: !POSIX }, () => {
       `Could not tighten permissions on ${tree.conversations}: Operation not permitted.`,
     ]);
     assert.equal(await mode(tree.app), 0o755);
+  });
+
+  void it("tightening stops at a symlinked owned ancestor and never touches the directories behind it", async () => {
+    const external = join(tree.root, "external");
+    await mkdir(join(external, "conversations"), { recursive: true });
+    await chmod(external, 0o755);
+    await chmod(join(external, "conversations"), 0o755);
+    await writeFile(join(external, "conversations", "keep.json"), "{}");
+    await mkdir(tree.state, { recursive: true });
+    await symlink(external, tree.app);
+    const warnings = await tightenExisting(nodeFs, historyOwnedDirectories(tree.conversations));
+    assert.deepEqual(warnings, [`Could not tighten permissions on ${tree.app}: Is a symbolic link.`]);
+    assert.equal(await mode(external), 0o755);
+    assert.equal(await mode(join(external, "conversations")), 0o755);
+    assert.deepEqual(await names(external), ["conversations"]);
+    assert.deepEqual(await names(join(external, "conversations")), ["keep.json"]);
+    assert.equal(await text(join(external, "conversations", "keep.json")), "{}");
+  });
+
+  void it("tightening stops at a non-directory owned ancestor", async () => {
+    await mkdir(tree.state, { recursive: true });
+    await writeFile(tree.app, "not a directory");
+    const warnings = await tightenExisting(nodeFs, historyOwnedDirectories(tree.conversations));
+    assert.deepEqual(warnings, [`Could not tighten permissions on ${tree.app}: Not a directory.`]);
+    assert.equal(await text(tree.app), "not a directory");
+  });
+
+  void it("a chmod failure on an owned ancestor does not stop its descendants", async () => {
+    await mkdir(tree.conversations, { recursive: true });
+    await chmod(tree.app, 0o755);
+    await chmod(tree.conversations, 0o755);
+    const chmods: string[] = [];
+    const fs = withFs({
+      chmod: (path, fileMode) => {
+        chmods.push(path);
+        return path === tree.app ? Promise.reject(errno("EPERM")) : nodeFs.chmod(path, fileMode);
+      },
+    });
+    const warnings = await tightenExisting(fs, historyOwnedDirectories(tree.conversations));
+    assert.deepEqual(warnings, [`Could not tighten permissions on ${tree.app}: Operation not permitted.`]);
+    assert.deepEqual(chmods, [tree.app, tree.conversations]);
+    assert.equal(await mode(tree.conversations), 0o700);
   });
 
   void it("fails an explicit save when permission preparation fails, writing nothing", async () => {

@@ -70,13 +70,18 @@ export async function tightenExisting(fs: StorageFs, owned: readonly string[]): 
     return warnings;
   }
   for (const directory of owned) {
+    // Set once the directory itself is verified; a failure before that means
+    // everything below it is unverified and must not be touched.
+    let verified = false;
     try {
       const info = await lstatIfPresent(fs, directory);
       if (info === undefined) continue;
       requireDirectory(info);
+      verified = true;
       await fs.chmod(directory, DIR_MODE);
     } catch (error: unknown) {
       warnings.push(`Could not tighten permissions on ${displayPath(directory)}: ${describeReason(error)}.`);
+      if (!verified) break; // a chmod failure on a verified directory still allows its descendants
     }
   }
   return warnings;
