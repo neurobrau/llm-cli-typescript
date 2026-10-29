@@ -1,0 +1,22 @@
+{
+  "schema_version": 1,
+  "id": "00000000-0000-4000-8000-000000000001",
+  "created_at": "2026-01-02T03:04:05.006Z",
+  "updated_at": "2026-01-02T03:04:05.006Z",
+  "provider": "ollama",
+  "model": "hf.co/org/model:Q4_K_M",
+  "messages": [
+    {
+      "role": "user",
+      "content": "line one\nline two\r\n\ttabbed \"quoted\" back\\slash"
+    },
+    {
+      "role": "assistant",
+      "content": "ctrl \u0001 \u001f \b \f del nul-free; ls ps  snow ☃ astral 😀 é"
+    },
+    {
+      "role": "user",
+      "content": ""
+    }
+  ]
+}

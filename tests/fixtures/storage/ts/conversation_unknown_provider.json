@@ -1,0 +1,14 @@
+{
+  "schema_version": 1,
+  "id": "0b6f8e52-2c1d-4c7e-9a3b-5d2e1f0a9c41",
+  "created_at": "2030-05-06T07:08:09.010Z",
+  "updated_at": "2030-05-06T07:08:09.010Z",
+  "provider": "futureai",
+  "model": "vendor/model:tag",
+  "messages": [
+    {
+      "role": "assistant",
+      "content": "x"
+    }
+  ]
+}

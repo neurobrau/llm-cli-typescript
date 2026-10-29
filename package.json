@@ -1,6 +1,6 @@
 {
   "name": "@neurobrau/llm-cli-typescript",
-  "version": "0.1.0",
+  "version": "0.2.0-dev",
   "private": true,
   "description": "NeuroBräu TypeScript — a terminal-based multi-provider LLM client",
   "type": "module",
@@ -15,7 +15,8 @@
     "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.test.json --noEmit",
     "lint": "eslint .",
     "test": "npm run build && npm run build:test && node scripts/run-tests.mjs",
-    "check": "npm run typecheck && npm run lint && npm test"
+    "check": "npm run typecheck && npm run lint && npm test",
+    "test:parity": "npm run build && node scripts/storage-parity.mjs"
   },
   "devDependencies": {
     "@eslint/js": "10.0.1",

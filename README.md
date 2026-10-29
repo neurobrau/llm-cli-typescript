@@ -1,6 +1,6 @@
 # NeuroBräu TypeScript
 
-TypeScript edition of the NeuroBräu LLM CLI. The current version, `0.1.0` (the CLI Foundation milestone), can send **one non-streaming one-shot prompt** to **OpenAI** (Responses API, official `openai` SDK 7.45.0) or to a **local Ollama server** (native HTTP API, no extra dependency) and print the answer. There is no chat, streaming, history, saved settings, pricing, or TUI yet. No Git tag or release exists for this version.
+TypeScript edition of the NeuroBräu LLM CLI. The current version is `0.2.0-dev` (work toward the interactive chat milestone); the completed CLI Foundation milestone was `0.1.0`. It can send **one non-streaming one-shot prompt** to **OpenAI** (Responses API, official `openai` SDK 7.45.0) or to a **local Ollama server** (native HTTP API, no extra dependency) and print the answer. There is no chat, streaming, history, saved settings, pricing, or TUI yet. Conversation, `active.json`, settings and usage-record JSON formats now have pure codecs with Python-compatible canonical output (`docs/storage.md`), but nothing reads or writes history or settings yet: the CLI never touches those files. No Git tag or release exists for any version.
 
 ## Prerequisites
 
@@ -21,7 +21,7 @@ npm run build
 ```sh
 node dist/cli.js                    # help (same as --help)
 node dist/cli.js --help             # or -h
-node dist/cli.js --version          # NeuroBräu TypeScript CLI 0.1.0
+node dist/cli.js --version          # NeuroBräu TypeScript CLI 0.2.0-dev
 export OPENAI_API_KEY=...           # read only when a prompt is sent
 node dist/cli.js "What is a neural network?"
 node dist/cli.js --provider ollama "What is a neural network?"   # first local model, no key
@@ -98,12 +98,13 @@ The installed SDK also reads `OPENAI_BASE_URL`, `OPENAI_ORG_ID`, `OPENAI_PROJECT
 | `npm run lint` | ESLint (flat config, type-aware `typescript-eslint`) |
 | `npm test` | build, compile tests to `.test-dist/`, run them with `node:test` |
 | `npm run check` | typecheck, lint, then `npm test` (build included) |
+| `npm run test:parity` | optional: storage codecs against the read-only Python reference (needs Python; exits 3 = blocked when unavailable; not part of `check`) |
 
 Tests include unit tests, runner tests with injected writers, and integration tests that spawn `dist/cli.js` with `process.execPath`, a sanitized environment, and temporary `HOME`/`XDG_*` directories. They contact only loopback mock servers (never OpenAI, never a real Ollama) and read no user data or credentials.
 
 ## Planned milestones
 
-Interactive chat, history and settings storage, streaming, pricing, and a terminal UI come in later tasks (OpenAI and Ollama one-shot are done). Version plan: `0.1.0` completed CLI Foundation; `0.2.0-dev` while working on chat/history/streaming, `0.2.0` when that milestone is complete; `0.3.0-dev`/`0.3.0` for the TUI; `0.4.0-dev`/`0.4.0` for full parity. See `docs/architecture.md` and `docs/parity.md`.
+Filesystem history and settings storage (Task 005B), interactive chat, streaming, pricing, and a terminal UI come in later tasks (OpenAI and Ollama one-shot are done). Version plan: `0.1.0` completed CLI Foundation; `0.2.0-dev` while working on chat/history/streaming, `0.2.0` when that milestone is complete; `0.3.0-dev`/`0.3.0` for the TUI; `0.4.0-dev`/`0.4.0` for full parity. See `docs/architecture.md` and `docs/parity.md`.
 
 ## Working documents
 

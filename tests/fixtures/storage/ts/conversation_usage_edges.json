@@ -1,0 +1,44 @@
+{
+  "schema_version": 1,
+  "id": "ffffffff-ffff-ffff-ffff-ffffffffffff",
+  "created_at": "2026-10-21T12:00:00.000Z",
+  "updated_at": "2026-10-21T12:00:00.999Z",
+  "provider": "openai",
+  "model": "gpt-6-luna",
+  "messages": [
+    {
+      "role": "user",
+      "content": "hi"
+    }
+  ],
+  "requests": [
+    {
+      "at": "2026-10-21T12:00:00.000Z",
+      "provider": "openai",
+      "model": "gpt-6-luna",
+      "status": "completed",
+      "service_tier": "",
+      "input_tokens": 0,
+      "output_tokens": 0
+    },
+    {
+      "at": "2026-10-21T12:00:01.000Z",
+      "provider": "ollama",
+      "model": "m",
+      "status": "incomplete"
+    },
+    {
+      "at": "2026-10-21T12:00:02.000Z",
+      "provider": "",
+      "model": "",
+      "status": "completed",
+      "service_tier": "flex",
+      "input_tokens": 9007199254740993,
+      "output_tokens": 9223372036854775807,
+      "total_tokens": 1180591620717411303429,
+      "cached_input_tokens": 9007199254740992,
+      "cache_write_tokens": 1,
+      "reasoning_tokens": 0
+    }
+  ]
+}

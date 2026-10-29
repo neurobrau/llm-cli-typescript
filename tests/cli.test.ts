@@ -70,7 +70,7 @@ function packageVersion(): string {
 }
 
 void describe("built CLI (dist/cli.js)", () => {
-  void it("reports the one package.json version, which the lockfile agrees with and which is not a dev version", async () => {
+  void it("reports the one package.json version, which the lockfile and the built output agree with", async () => {
     const lock = JSON.parse(readFileSync(join(ROOT, "package-lock.json"), "utf8")) as {
       version: string;
       packages: Record<string, { version: string }>;
@@ -78,9 +78,9 @@ void describe("built CLI (dist/cli.js)", () => {
     const version = packageVersion();
     assert.equal(lock.version, version);
     assert.equal(lock.packages[""]?.version, version);
-    assert.match(version, /^\d+\.\d+\.\d+$/);
+    assert.match(version, /^\d+\.\d+\.\d+(?:-dev)?$/);
     assert.equal((await runCli(["--version"])).stdout, `NeuroBräu TypeScript CLI ${version}\n`);
-    assert.ok(!(await runCli(["--help"])).stdout.includes("-dev"));
+    assert.ok((await runCli(["--help"])).stdout.includes(`NeuroBräu TypeScript CLI ${version}`));
   });
 
   void it("is emitted at dist/cli.js, not dist/src/cli.js", () => {

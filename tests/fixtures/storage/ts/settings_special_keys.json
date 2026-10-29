@@ -1,0 +1,66 @@
+{
+  "schema_version": 1,
+  "answer_style": "detailed",
+  "providers": {
+    "__proto__": {
+      "models": {
+        "__proto__": {
+          "max_output_tokens": null
+        },
+        "constructor": {
+          "reasoning": "default"
+        },
+        "toString": {
+          "reasoning": "on",
+          "max_output_tokens": 9007199254740993
+        }
+      }
+    },
+    "ollama": {
+      "models": {
+        "1": {
+          "reasoning": "high"
+        },
+        "10": {
+          "max_output_tokens": 1180591620717411303424
+        },
+        "9": {
+          "reasoning": "off"
+        },
+        "Z": {
+          "reasoning": "upper"
+        },
+        "a": {
+          "reasoning": "lower"
+        },
+        "a/b:c": {
+          "max_output_tokens": 600
+        },
+        "é": {
+          "reasoning": "x"
+        }
+      }
+    },
+    "openai": {
+      "models": {
+        "gpt-6-luna": {
+          "max_output_tokens": 1180591620717411303429
+        }
+      }
+    },
+    "￮": {
+      "models": {
+        "bmp-high": {
+          "max_output_tokens": 1
+        }
+      }
+    },
+    "😀": {
+      "models": {
+        "z": {
+          "reasoning": "low"
+        }
+      }
+    }
+  }
+}

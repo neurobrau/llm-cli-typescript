@@ -1,6 +1,6 @@
 # Architecture
 
-Status: `0.1.0` (CLI Foundation milestone: non-streaming OpenAI and Ollama one-shot). No tag or release has been created or published.
+Status: `0.2.0-dev` (milestone 0.2 in progress). The completed CLI Foundation (`0.1.0`: non-streaming OpenAI and Ollama one-shot) is behavior-preserved; internal storage codecs exist but are not wired in. No tag or release has been created or published.
 
 ## CLI composition
 
@@ -99,14 +99,18 @@ Used by the one-shot path below.
 
 **Streaming** is still not implemented: `stream()` lazily yields one failed event, with no discovery or network.
 
+## Storage codecs (Task 005A)
+
+`src/storage/` holds pure codecs for conversations, `active.json`, `settings.json` and usage records: lossless integers (`bigint` from `JSON.parse` source lexemes), strict RFC 3339 timestamps, validation with typed `StorageCodecError`s, and Python-compatible canonical output. It imports nothing from Node (no fs, env, clock, network) and is not used by `main.ts`, `cli.ts` or any provider. Details, boundaries and the parity check: `docs/storage.md`. Filesystem stores, atomic writes, sessions and chat come next (Task 005B and later).
+
 ## Versioning
 
 `package.json` is the only version authority at runtime; `package-lock.json` must agree (tested). The version changes when a milestone is entered or completed, not silently left alone. Completing a milestone is separate from tagging or publishing it.
 
 | Stage | Version |
 | --- | --- |
-| Completed CLI Foundation (OpenAI + Ollama non-streaming) | 0.1.0 |
-| Work on chat/history/streaming | 0.2.0-dev |
+| Completed CLI Foundation (OpenAI + Ollama non-streaming) | 0.1.0 (done) |
+| Work on chat/history/streaming | 0.2.0-dev (current) |
 | Completed interactive chat milestone | 0.2.0 |
 | TUI development / completed TUI | 0.3.0-dev / 0.3.0 |
 | Full parity development / completed milestone | 0.4.0-dev / 0.4.0 |

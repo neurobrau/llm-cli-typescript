@@ -2,14 +2,14 @@
 
 ## Current scope and limitations
 
-`0.1.0` implements `-h`/`--help`, `--version` and a non-streaming one-shot prompt for OpenAI and Ollama (`--provider openai|ollama`). Not implemented: chat, history and settings storage, streaming (`--stream` is rejected), pricing, model-discovery commands, terminal UI, `--plain`, `--no-history`, `--transcript-on-exit`. Exit codes 1-8, 130 and 141 are produced for the one-shot path.
+`0.2.0-dev` (the completed `0.1.0` CLI Foundation behavior is unchanged) implements `-h`/`--help`, `--version` and a non-streaming one-shot prompt for OpenAI and Ollama (`--provider openai|ollama`). Not implemented: chat, history and settings storage, streaming (`--stream` is rejected), pricing, model-discovery commands, terminal UI, `--plain`, `--no-history`, `--transcript-on-exit`. Exit codes 1-8, 130 and 141 are produced for the one-shot path.
 
 ## References
 
 - Python (primary behavior reference): `0a6d045c022b850371a1c51a1df30f11d9d4c60e`
 - Go: `b064decc66cad7d9656488bdf7749650b52cf309`
 
-Both are read-only. The Go version constant (`0.4.0-dev`) and the Python version are independent of this edition's `0.1.0` (version plan in `docs/architecture.md`).
+Both are read-only. The Go version constant (`0.4.0-dev`) and the Python version are independent of this edition's `0.2.0-dev` (version plan in `docs/architecture.md`).
 
 ## Settings resolution (Task 002, internal)
 
@@ -54,6 +54,10 @@ References: Python `providers/ollama_provider.py`, `tests/test_ollama_provider.p
 - Diagnostics are control-stripped, single-line and capped at 300 characters (Python 200, Go 200 runes).
 - Connection errors name only the scheme, host and port, never the path prefix.
 - Concurrent use of one provider instance is unsupported (as in Go).
+
+## Storage codec differences (Task 005A)
+
+Full table and rationale in `docs/storage.md`. Summary: counts and saved token limits are `bigint` (Python-compatible beyond 64 bits; Go rejects those); timestamps are strict RFC 3339 like Go (Python accepts more) within years 0001-9999; `schema_version: true`, `NaN`/`Infinity` and lone surrogates are rejected; unknown `active.json` providers are a typed error; settings notices are ordered by code point. Canonical bytes match Python for supported files (verified by `npm run test:parity` on Python 3.14.8, and by the six Python-generated Go fixtures). Direct execution of the Go serializers is deferred to the consolidated parity gate.
 
 ## Proposed future decisions (not implemented, not yet accepted by the owner)
 
