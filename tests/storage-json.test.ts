@@ -263,3 +263,35 @@ void describe("timestamps", () => {
     }
   });
 });
+
+void describe("runtimes without JSON.parse source-text access", () => {
+  type Reviver = (this: unknown, key: string, value: unknown, context?: { source?: string }) => unknown;
+  // Simulates an older engine: the reviver is called with the rounded number and either no context or one without `source`.
+  function withEngine(callReviver: (reviver: Reviver) => void, action: () => unknown): StorageCodecError {
+    const native = JSON.parse;
+    const stub = (_text: string, reviver: Reviver): unknown => {
+      callReviver(reviver);
+      return null;
+    };
+    JSON.parse = stub as typeof JSON.parse;
+    try {
+      return codecError(action, "runtime");
+    } finally {
+      JSON.parse = native;
+    }
+  }
+
+  void it("reports kind runtime, not syntax, when the reviver context is absent", () => {
+    const error = withEngine((reviver) => reviver.call({}, "n", 9007199254740992), () => parseJson("[9007199254740993]"));
+    assert.match(error.message, /source-text access/);
+  });
+
+  void it("reports kind runtime when the context has no source", () => {
+    withEngine((reviver) => reviver.call({}, "n", 9007199254740992, {}), () => parseJson("9007199254740993"));
+  });
+
+  void it("is not affected for input without numbers, and the real engine still works", () => {
+    assert.equal(parseJson('"text"'), "text");
+    assert.equal((parseJson("9007199254740993") as JsonNumber).source, "9007199254740993");
+  });
+});

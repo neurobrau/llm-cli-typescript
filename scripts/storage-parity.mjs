@@ -11,6 +11,8 @@
 // `src` directory; default ../llm-cli-python/src) and NEUROBRAU_PYTHON (the
 // interpreter; default python3). Exit codes: 0 all checks passed, 1 a check
 // failed, 3 BLOCKED (reference or interpreter unavailable; nothing was checked).
+// The temporary directory is always removed before the process ends: the exit
+// status is only recorded (process.exitCode), never forced with process.exit().
 import { Buffer } from "node:buffer";
 import { spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
@@ -24,13 +26,15 @@ const PYTHON_SRC = resolve(process.env.NEUROBRAU_PYTHON_SRC ?? join(ROOT, "..", 
 const HELPER = join(ROOT, "scripts", "python_storage_parity.py");
 const TIMEOUT_MS = 30_000;
 
+class Blocked extends Error {}
+
 function blocked(reason) {
-  console.error(`BLOCKED (not passed, nothing was checked): ${reason}`);
-  process.exit(3);
+  throw new Blocked(reason);
 }
 
 if (!existsSync(join(PYTHON_SRC, "neurobrau_cli", "storage.py"))) {
-  blocked(`Python reference sources not found at ${PYTHON_SRC} (set NEUROBRAU_PYTHON_SRC)`);
+  console.error(`BLOCKED (not passed, nothing was checked): Python reference sources not found at ${PYTHON_SRC} (set NEUROBRAU_PYTHON_SRC)`);
+  process.exit(3); // nothing to clean up yet
 }
 const scratch = mkdtempSync(join(tmpdir(), "neurobrau-parity-"));
 const pythonEnv = {
@@ -52,6 +56,20 @@ function python(args) {
 }
 
 try {
+  await main();
+} catch (error) {
+  if (error instanceof Blocked) {
+    console.error(`BLOCKED (not passed, nothing was checked): ${error.message}`);
+    process.exitCode = 3;
+  } else {
+    console.error(error instanceof Error ? error.message : String(error));
+    process.exitCode = 1;
+  }
+} finally {
+  rmSync(scratch, { recursive: true, force: true });
+}
+
+async function main() {
   const version = python(["--version"]);
   if (version.error || version.status !== 0) {
     blocked(`interpreter "${PYTHON}" cannot run (${version.error?.message ?? `exit ${String(version.status)}`}); set NEUROBRAU_PYTHON`);
@@ -132,9 +150,8 @@ try {
   console.log(`checked ${String(checked)} files in both directions (Python -> TS -> Python, TS -> Python -> TS)`);
   if (failures.length > 0) {
     for (const failure of failures) console.error(`FAIL ${failure}`);
-    process.exit(1);
+    process.exitCode = 1;
+    return;
   }
   console.log("PASS: byte-identical in every checked direction");
-} finally {
-  rmSync(scratch, { recursive: true, force: true });
 }

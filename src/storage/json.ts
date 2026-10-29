@@ -55,10 +55,11 @@ function decodeUtf8(bytes: Uint8Array): string {
   }
 }
 
-function revive(this: unknown, _key: string, value: unknown, context: JsonParseContext): unknown {
+function revive(this: unknown, _key: string, value: unknown, context?: JsonParseContext): unknown {
   if (typeof value === "number") {
-    // Never fall back to the (possibly rounded) numeric argument.
-    if (typeof context.source !== "string") {
+    // Never fall back to the (possibly rounded) numeric argument. Runtimes without
+    // source-text access pass no context at all, or one without `source`.
+    if (typeof context?.source !== "string") {
       throw new StorageCodecError("runtime", "JSON.parse source-text access is not available in this runtime");
     }
     return new JsonNumber(context.source);
