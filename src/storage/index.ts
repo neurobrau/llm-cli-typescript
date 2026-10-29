@@ -17,3 +17,5 @@ export type {
 
 /** Largest count Go's signed 64-bit integers can read; larger stored counts are Python-only. */
 export const GO_MAX_COUNT = 9_223_372_036_854_775_807n;
+export { matchesSelection } from "./matching.js";
+export type { SelectionFilter } from "./matching.js";

@@ -59,6 +59,10 @@ References: Python `providers/ollama_provider.py`, `tests/test_ollama_provider.p
 
 Full table and rationale in `docs/storage.md`. Summary: counts and saved token limits are `bigint` (Python-compatible beyond 64 bits; Go rejects those); timestamps are strict RFC 3339 like Go (Python accepts more) within years 0001-9999; `schema_version: true`, `NaN`/`Infinity` and lone surrogates are rejected; unknown `active.json` providers are a typed error; settings notices are ordered by code point. Canonical bytes match Python for supported files (verified by `npm run test:parity` on Python 3.14.8, and by the six Python-generated Go fixtures). Direct execution of the Go serializers is deferred to the consolidated parity gate.
 
+## Filesystem storage differences (Task 005B)
+
+Details in `docs/storage.md`. Intentional differences from the references: only regular files directly inside the conversations directory are considered (symlinks, FIFOs and subdirectories are ignored, where the references list every `*.json` name); symlinks or non-directories at application-owned directory locations are refused (references follow them); settings own their containing directory whatever its name; saving settings before a load is refused, and a failed whole-file load disables saving permanently for the instance, including against later loads; writes of one instance are serialized in invocation order; `mtime` ties use bigint nanoseconds; messages use fixed reasons and escaped paths. Behavior kept from the references: canonical bytes, `0700`/`0600` modes, the temp-file naming, rename as commit with best-effort directory fsync, unknown stored provider strings, a file name differing from its internal id, no rewriting on load, last writer wins across instances. Go serializers and the CLI-level restore flow remain for the consolidated parity gate.
+
 ## Proposed future decisions (not implemented, not yet accepted by the owner)
 
 - Python's language-neutral specification is the primary contract; each deviation is recorded individually.

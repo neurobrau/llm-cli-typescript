@@ -1,6 +1,6 @@
 # NeuroBräu TypeScript
 
-TypeScript edition of the NeuroBräu LLM CLI. The current version is `0.2.0-dev` (work toward the interactive chat milestone); the completed CLI Foundation milestone was `0.1.0`. It can send **one non-streaming one-shot prompt** to **OpenAI** (Responses API, official `openai` SDK 7.45.0) or to a **local Ollama server** (native HTTP API, no extra dependency) and print the answer. There is no chat, streaming, history, saved settings, pricing, or TUI yet. Conversation, `active.json`, settings and usage-record JSON formats now have pure codecs with Python-compatible canonical output (`docs/storage.md`), but nothing reads or writes history or settings yet: the CLI never touches those files. No Git tag or release exists for any version.
+TypeScript edition of the NeuroBräu LLM CLI. The current version is `0.2.0-dev` (work toward the interactive chat milestone); the completed CLI Foundation milestone was `0.1.0`. It can send **one non-streaming one-shot prompt** to **OpenAI** (Responses API, official `openai` SDK 7.45.0) or to a **local Ollama server** (native HTTP API, no extra dependency) and print the answer. There is no chat, streaming, history, saved settings, pricing, or TUI yet. Conversation, `active.json`, settings and usage-record JSON formats now have pure codecs with Python-compatible canonical output (`docs/storage.md`), and an internal filesystem layer (`src/storage/fs/`: injected XDG paths, atomic owner-only writes, history, active selection and settings stores) exists, but it is not connected to the CLI: no command reads or writes history or settings, and the CLI never touches those files. No Git tag or release exists for any version.
 
 ## Prerequisites
 
@@ -104,7 +104,7 @@ Tests include unit tests, runner tests with injected writers, and integration te
 
 ## Planned milestones
 
-Filesystem history and settings storage (Task 005B), interactive chat, streaming, pricing, and a terminal UI come in later tasks (OpenAI and Ollama one-shot are done). Version plan: `0.1.0` completed CLI Foundation; `0.2.0-dev` while working on chat/history/streaming, `0.2.0` when that milestone is complete; `0.3.0-dev`/`0.3.0` for the TUI; `0.4.0-dev`/`0.4.0` for full parity. See `docs/architecture.md` and `docs/parity.md`.
+Connecting history and settings to the CLI, interactive chat, streaming, pricing, and a terminal UI come in later tasks (OpenAI and Ollama one-shot are done). Version plan: `0.1.0` completed CLI Foundation; `0.2.0-dev` while working on chat/history/streaming, `0.2.0` when that milestone is complete; `0.3.0-dev`/`0.3.0` for the TUI; `0.4.0-dev`/`0.4.0` for full parity. See `docs/architecture.md` and `docs/parity.md`.
 
 ## Working documents
 

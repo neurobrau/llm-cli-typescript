@@ -101,7 +101,11 @@ Used by the one-shot path below.
 
 ## Storage codecs (Task 005A)
 
-`src/storage/` holds pure codecs for conversations, `active.json`, `settings.json` and usage records: lossless integers (`bigint` from `JSON.parse` source lexemes), strict RFC 3339 timestamps, validation with typed `StorageCodecError`s, and Python-compatible canonical output. It imports nothing from Node (no fs, env, clock, network) and is not used by `main.ts`, `cli.ts` or any provider. Details, boundaries and the parity check: `docs/storage.md`. Filesystem stores, atomic writes, sessions and chat come next (Task 005B and later).
+`src/storage/` holds pure codecs for conversations, `active.json`, `settings.json` and usage records: lossless integers (`bigint` from `JSON.parse` source lexemes), strict RFC 3339 timestamps, validation with typed `StorageCodecError`s, and Python-compatible canonical output. It imports nothing from Node (no fs, env, clock, network) and is not used by `main.ts`, `cli.ts` or any provider. Details, boundaries and the parity check: `docs/storage.md`. Sessions and chat come after Task 005B.
+
+## Filesystem storage (Task 005B)
+
+`src/storage/fs/` is a separate, explicit entry point (`src/storage/fs/index.ts`) over `node:fs/promises`, `node:path` and `node:crypto`: injected XDG path resolution, one atomic writer (rename is the commit point), `HistoryStore` (conversations plus `active.json`), `SettingsStore` (an explicit load-before-save state machine) and UUID creation. Nothing runs at import or construction, the pure codecs never import it, and it is not wired into the CLI: one-shot behavior is unchanged. Per-instance write operations are serialized in invocation order; independent instances are last-writer-wins. See `docs/storage.md`.
 
 ## Versioning
 
