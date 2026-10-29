@@ -190,7 +190,7 @@ void describe("provider creation", () => {
         return new FakeProvider();
       },
     };
-    for (const argv of [[], ["--help"], ["--version"], ["--bogus"], ["--stream", "p"], ["--provider", "other", "p"], [""], ["--usage"], ["a", "b"], ["--max-output-tokens", "0", "p"]]) {
+    for (const argv of [["--help"], ["--version"], ["--bogus"], ["--stream", "p"], ["--plain", "p"], ["--provider", "other", "p"], [""], ["a", "b"], ["--max-output-tokens", "0", "p"]]) {
       await run(argv, capture().io, deps);
     }
     assert.equal(created, 0);
@@ -270,7 +270,7 @@ void describe("interrupts", () => {
 
   void it("registers no handler for help, version or invalid arguments", async () => {
     const interrupt = interruptSource();
-    for (const argv of [[], ["--version"], ["--bogus"]]) {
+    for (const argv of [["--help"], ["--version"], ["--bogus"], ["--plain", "p"]]) {
       await run(argv, capture().io, { interrupt: interrupt.source });
     }
     assert.equal(interrupt.registered(), 0);

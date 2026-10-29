@@ -26,15 +26,15 @@ void describe("the pure codec entry point", () => {
     }
   });
 
-  void it("is the only thing the application entry points could import: nothing outside src/storage and tests uses the storage layer yet", () => {
-    for (const dir of ["application", "domain", "providers"]) {
+  void it("is imported only by the chat composition: domain, providers, the resolver, argument parsing and the executable entry do not use the storage layer", () => {
+    for (const dir of ["domain", "providers"]) {
       for (const name of readdirSync(join(ROOT, "src", dir), { recursive: true, encoding: "utf8" })) {
         if (!name.endsWith(".ts")) continue;
         assert.ok(!readFileSync(join(ROOT, "src", dir, name), "utf8").includes("storage/"), `${dir}/${name}`);
       }
     }
-    for (const name of ["main.ts", "cli.ts", "args.ts", "process-io.ts", "help.ts", "version.ts"]) {
-      assert.ok(!readFileSync(join(ROOT, "src", name), "utf8").includes("storage"), name);
+    for (const name of ["cli.ts", "args.ts", "process-io.ts", "help.ts", "version.ts", "application/resolve-settings.ts"]) {
+      assert.ok(!readFileSync(join(ROOT, "src", name), "utf8").includes("storage/"), name);
     }
   });
 });

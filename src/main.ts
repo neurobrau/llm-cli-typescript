@@ -1,29 +1,26 @@
 import { PROGRAM_NAME, parseCliArgs } from "./args.js";
 import type { PromptInvocation } from "./args.js";
 import { resolveSettings } from "./application/resolve-settings.js";
+import type { HistoryPort, SettingsPort } from "./application/chat-startup.js";
+import { runChat } from "./chat/run-chat.js";
 import { EXIT_CANCELLED, ProviderError, SettingsError, exitCodeForKind, isAbortError } from "./domain/errors.js";
 import type { ProviderId } from "./domain/generation.js";
 import type { Provider } from "./domain/provider.js";
 import { styleInstructions } from "./domain/settings.js";
-import { formatUsage, helpText, usageHint, versionText } from "./help.js";
+import { EDITION_TITLE, formatUsage, helpText, usageHint, versionText } from "./help.js";
 import { OpenAIProvider } from "./providers/openai/provider.js";
+import { EXIT_BROKEN_PIPE, EXIT_FAILURE, EXIT_INCOMPLETE, EXIT_OK, EXIT_USAGE, OutputError, hasErrorCode, write } from "./io.js";
+import type { InterruptSource, Io } from "./io.js";
+import { EMPTY_INPUT } from "./line-input.js";
+import type { LineInput } from "./line-input.js";
+import { HistoryStore } from "./storage/fs/history-store.js";
+import { newConversationId } from "./storage/fs/paths.js";
+import type { StorageEnvironment } from "./storage/fs/paths.js";
+import { SettingsStore } from "./storage/fs/settings-store.js";
 import { readPackageVersion } from "./version.js";
 
-export type Writer = (text: string) => Promise<void> | void;
-
-export interface Io {
-  readonly stdout: Writer;
-  readonly stderr: Writer;
-}
-
-/**
- * Registers an interrupt (SIGINT) callback for the duration of one operation
- * and returns a function that unregisters it. The executable supplies the
- * real signal wiring; unit tests inject their own.
- */
-export interface InterruptSource {
-  register(onInterrupt: () => void): () => void;
-}
+export { EXIT_BROKEN_PIPE, EXIT_FAILURE, EXIT_INCOMPLETE, EXIT_OK, EXIT_USAGE };
+export type { InterruptSource, Io, Writer } from "./io.js";
 
 export interface RunDependencies {
   /**
@@ -38,21 +35,29 @@ export interface RunDependencies {
   readonly interrupt?: InterruptSource;
   /** Upper bound for waiting on an aborted operation to settle. Default 2000 ms. */
   readonly cleanupTimeoutMs?: number;
-}
 
-export const EXIT_OK = 0;
-export const EXIT_FAILURE = 1;
-export const EXIT_USAGE = 2;
-export const EXIT_INCOMPLETE = 8;
-export const EXIT_BROKEN_PIPE = 141;
+  // ----- interactive chat only (never used by a one-shot prompt) -----
+
+  /**
+   * Where conversations and settings live. Only these injected values are
+   * consulted: default is an empty environment without a home, which disables
+   * history and settings (with warnings) instead of guessing a location.
+   */
+  readonly storageEnvironment?: { readonly env: StorageEnvironment; readonly home?: string | undefined };
+  /** Creates the line input when the chat starts; the run disposes it. Default: input that is already at its end. */
+  readonly createInput?: () => LineInput;
+  /** Throws a ProviderError when the selected provider cannot run (e.g. no key). Must not use the network. */
+  readonly checkProviderReady?: (id: ProviderId) => void;
+  /** Time source for conversation and usage timestamps. Default: the system clock. */
+  readonly clock?: () => Date;
+  /** Conversation ID source. Default: random UUIDs. */
+  readonly newId?: () => string;
+  /** Stores are built only from paths resolved out of `storageEnvironment`. Defaults: the filesystem stores. */
+  readonly createHistoryStore?: (conversationsDirectory: string) => HistoryPort;
+  readonly createSettingsStore?: (path: string) => SettingsPort;
+}
 
 const DEFAULT_CLEANUP_TIMEOUT_MS = 2000;
-
-class OutputError extends Error {
-  constructor(readonly cause: unknown) {
-    super("output failed");
-  }
-}
 
 /** Runs the CLI and returns the exit code; never calls process.exit(). */
 export async function run(argv: readonly string[], io: Io, deps: RunDependencies = {}): Promise<number> {
@@ -80,6 +85,20 @@ async function execute(argv: readonly string[], io: Io, deps: RunDependencies): 
       return EXIT_USAGE;
     case "prompt":
       return runPrompt(parsed.invocation, io, deps);
+    case "chat":
+      return runChat(parsed.invocation, io, {
+        title: `${EDITION_TITLE} ${readPackageVersion()}`,
+        interrupt: deps.interrupt,
+        cleanupTimeoutMs: deps.cleanupTimeoutMs ?? DEFAULT_CLEANUP_TIMEOUT_MS,
+        createInput: deps.createInput ?? (() => EMPTY_INPUT),
+        environment: deps.storageEnvironment ?? { env: {} },
+        clock: deps.clock ?? (() => new Date()),
+        newId: deps.newId ?? newConversationId,
+        createProvider: deps.createProvider ?? defaultProvider,
+        checkProviderReady: deps.checkProviderReady,
+        createHistoryStore: deps.createHistoryStore ?? ((directory) => new HistoryStore(directory)),
+        createSettingsStore: deps.createSettingsStore ?? ((path) => new SettingsStore(path)),
+      });
   }
 }
 
@@ -217,14 +236,6 @@ async function present(result: OneShotResult, invocation: PromptInvocation, io: 
   return EXIT_INCOMPLETE;
 }
 
-async function write(writer: Writer, text: string): Promise<void> {
-  try {
-    await writer(text);
-  } catch (error: unknown) {
-    throw new OutputError(error);
-  }
-}
-
 async function outputFailureCode(cause: unknown, io: Io): Promise<number> {
   if (hasErrorCode(cause, "EPIPE")) {
     return EXIT_BROKEN_PIPE;
@@ -245,8 +256,4 @@ async function reportInternalError(error: unknown, io: Io): Promise<number> {
     return hasErrorCode(writeError, "EPIPE") ? EXIT_BROKEN_PIPE : EXIT_FAILURE;
   }
   return EXIT_FAILURE;
-}
-
-function hasErrorCode(error: unknown, code: string): boolean {
-  return typeof error === "object" && error !== null && "code" in error && error.code === code;
 }

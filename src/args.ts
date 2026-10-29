@@ -18,14 +18,34 @@ export interface PromptInvocation {
   readonly prompt: string;
 }
 
+/**
+ * A validated interactive (plain chat) request. `provider` is present only
+ * when `--provider` was given: restoring a conversation treats an omitted
+ * provider differently from an explicit `--provider openai`. A `--model`
+ * without `--provider` selects OpenAI at the application layer, not here.
+ */
+export interface ChatInvocation {
+  readonly provider?: ProviderId;
+  readonly model?: string;
+  readonly reasoning?: CliReasoning;
+  readonly maxOutputTokens?: number;
+  readonly answerStyle?: AnswerStyle;
+  readonly usage: boolean;
+  readonly noHistory: boolean;
+}
+
 export type ParsedArgs =
   | { readonly kind: "help" }
   | { readonly kind: "version" }
   | { readonly kind: "prompt"; readonly invocation: PromptInvocation }
+  | { readonly kind: "chat"; readonly invocation: ChatInvocation }
   | { readonly kind: "error"; readonly message: string };
 
 /** Options of the Python/Go editions that this build deliberately rejects. */
-const FUTURE_OPTIONS: ReadonlySet<string> = new Set(["stream", "plain", "no-history", "transcript-on-exit"]);
+const FUTURE_OPTIONS: ReadonlySet<string> = new Set(["stream", "transcript-on-exit"]);
+
+/** Switches that only make sense for the interactive chat. */
+const CHAT_SWITCHES: ReadonlySet<string> = new Set(["plain", "no-history"]);
 
 const VALUE_OPTIONS = ["provider", "model", "reasoning-effort", "max-output-tokens", "answer-style"] as const;
 type ValueOption = (typeof VALUE_OPTIONS)[number];
@@ -34,6 +54,8 @@ const OPTIONS = {
   help: { type: "boolean", short: "h" },
   version: { type: "boolean" },
   usage: { type: "boolean" },
+  plain: { type: "boolean" },
+  "no-history": { type: "boolean" },
   provider: { type: "string" },
   model: { type: "string" },
   "reasoning-effort": { type: "string" },
@@ -62,6 +84,7 @@ export function parseCliArgs(argv: readonly string[]): ParsedArgs {
   let help = false;
   let version = false;
   let usage = false;
+  const chatSwitches = new Set<string>();
   const values = new Map<ValueOption, string>();
   const valued: string[] = [];
   const problems: string[] = [];
@@ -74,15 +97,17 @@ export function parseCliArgs(argv: readonly string[]): ParsedArgs {
       positionals.push(token.value);
     } else if (token.kind === "option") {
       const { name, rawName } = token;
-      if (name === "help" || name === "version" || name === "usage") {
+      if (name === "help" || name === "version" || name === "usage" || CHAT_SWITCHES.has(name)) {
         if (token.inlineValue === true) {
           valued.push(rawName);
         } else if (name === "help") {
           help = true;
         } else if (name === "version") {
           version = true;
-        } else {
+        } else if (name === "usage") {
           usage = true;
+        } else {
+          chatSwitches.add(name);
         }
       } else if (isValueOption(name)) {
         // A separate value that looks like an option is a missing value (use --opt=value for such text).
@@ -111,7 +136,9 @@ export function parseCliArgs(argv: readonly string[]): ParsedArgs {
     return fail(`invalid argument: ${firstProblem}`);
   }
   const hasGenerationOptions = usage || values.size > 0;
-  if ((help || version) && (future.length > 0 || unknown.length > 0 || positionals.length > 0 || hasGenerationOptions)) {
+  const hasOtherArguments =
+    future.length > 0 || unknown.length > 0 || positionals.length > 0 || hasGenerationOptions || chatSwitches.size > 0;
+  if ((help || version) && hasOtherArguments) {
     const switchName = help ? "--help" : "--version";
     return fail(`invalid invocation: ${switchName} cannot be combined with other arguments`);
   }
@@ -137,13 +164,32 @@ export function parseCliArgs(argv: readonly string[]): ParsedArgs {
   }
   const [prompt] = positionals;
   if (prompt === undefined) {
-    if (hasGenerationOptions) {
-      return fail("a prompt is required when generation options are given");
+    if (help) {
+      return { kind: "help" };
     }
-    return version ? { kind: "version" } : { kind: "help" };
+    if (version) {
+      return { kind: "version" };
+    }
+    // No prompt: plain chat, with or without options.
+    return {
+      kind: "chat",
+      invocation: {
+        ...(values.has("provider") ? { provider: settings.provider } : {}),
+        ...(settings.model === undefined ? {} : { model: settings.model }),
+        ...(settings.reasoning === undefined ? {} : { reasoning: settings.reasoning }),
+        ...(settings.maxOutputTokens === undefined ? {} : { maxOutputTokens: settings.maxOutputTokens }),
+        ...(settings.answerStyle === undefined ? {} : { answerStyle: settings.answerStyle }),
+        usage,
+        noHistory: chatSwitches.has("no-history"),
+      },
+    };
   }
   if (prompt.trim() === "") {
     return fail("the prompt must not be empty");
+  }
+  const [firstChatSwitch] = chatSwitches;
+  if (firstChatSwitch !== undefined) {
+    return fail(`option "--${firstChatSwitch}" cannot be used with a prompt: it applies to the interactive chat only`);
   }
   return { kind: "prompt", invocation: { ...settings, usage, prompt } };
 }

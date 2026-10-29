@@ -1,6 +1,6 @@
 # NeuroBräu TypeScript
 
-TypeScript edition of the NeuroBräu LLM CLI. The current version is `0.2.0-dev` (work toward the interactive chat milestone); the completed CLI Foundation milestone was `0.1.0`. It can send **one non-streaming one-shot prompt** to **OpenAI** (Responses API, official `openai` SDK 7.45.0) or to a **local Ollama server** (native HTTP API, no extra dependency) and print the answer. There is no chat, streaming, history, saved settings, pricing, or TUI yet. Conversation, `active.json`, settings and usage-record JSON formats now have pure codecs with Python-compatible canonical output (`docs/storage.md`), and an internal filesystem layer (`src/storage/fs/`: injected XDG paths, atomic owner-only writes, history, active selection and settings stores) exists, but it is not connected to the CLI: no command reads or writes history or settings, and the CLI never touches those files. No Git tag or release exists for any version.
+TypeScript edition of the NeuroBräu LLM CLI. The current version is `0.2.0-dev` (work toward the interactive chat milestone); the completed CLI Foundation milestone was `0.1.0`. It can send **one non-streaming one-shot prompt** to **OpenAI** (Responses API, official `openai` SDK 7.45.0) or to a **local Ollama server** (native HTTP API, no extra dependency) and print the answer, and, without a prompt, it runs a **non-streaming line-oriented chat** (`YOU >` / `AI >`) on the same providers that restores and saves conversations, applies saved settings and understands `/help`, `/reset`, `/cleanup`, `/usage` and `/exit`. There is no streaming, pricing or cost estimate, provider/model switching, or fullscreen TUI yet. Conversation, `active.json`, settings and usage-record JSON follow the Python reference formats (`docs/storage.md`). No Git tag or release exists for any version.
 
 ## Prerequisites
 
@@ -19,7 +19,7 @@ npm run build
 ## Usage
 
 ```sh
-node dist/cli.js                    # help (same as --help)
+node dist/cli.js                    # plain chat (continues the last conversation)
 node dist/cli.js --help             # or -h
 node dist/cli.js --version          # NeuroBräu TypeScript CLI 0.2.0-dev
 export OPENAI_API_KEY=...           # read only when a prompt is sent
@@ -31,6 +31,7 @@ node dist/cli.js --provider ollama "What is a neural network?"   # first local m
 neurobrau [--provider openai|ollama] [--model MODEL_ID]
           [--reasoning-effort EFFORT] [--max-output-tokens N]
           [--answer-style brief|normal|detailed] [--usage] "prompt"
+neurobrau [same options] [--plain] [--no-history]          # chat: no prompt
 ```
 
 - Defaults: provider `openai`, model `gpt-6-luna` (the project default; any model ID may be given with `--model` and is not checked against the live Models API), answer style `normal`. With `--provider ollama` the default model is the first selectable local model in Ollama's `/api/tags` order.
@@ -47,17 +48,56 @@ Invalid invocations exit 2 before any key lookup or network use:
 | Input | Result |
 | --- | --- |
 | unknown option | `unknown option` |
-| `--stream`, `--plain`, `--no-history`, `--transcript-on-exit` | `unsupported option … not implemented yet` |
+| `--stream`, `--transcript-on-exit` | `unsupported option … not implemented yet` |
+| `--plain` or `--no-history` together with a prompt | `option … cannot be used with a prompt` (exit 2, before any provider, key, file or network use) |
 | an unknown provider (anything but `openai`/`ollama`) | `invalid provider … expected openai or ollama` |
 | an invalid `OLLAMA_HOST` (only with `--provider ollama`) | `Invalid OLLAMA_HOST: …` |
 | empty or blank prompt, or more than one positional | prompt error |
-| generation options without a prompt | `a prompt is required when generation options are given` |
 | `--help` / `--version` together, or with any other argument | `conflicting options` / `invalid invocation` |
 | `--version=foo`, a missing or repeated option value | `invalid argument` |
 | invalid effort, style, provider, or token count (not a positive safe integer) | named diagnostic |
 | an effort or limit the model is known not to support | settings error from the resolver |
 
 Repeated identical `--help`, `--version` and `--usage` switches are idempotent. A value for `--model` and similar options that starts with `-` must use the `--option=value` form.
+
+### Manual chat smoke test (owner-run, local Ollama, isolated state)
+
+Not run by the agent or the test suite. It uses a throw-away directory for HOME and the XDG trees, so your real conversations are neither listed nor deleted, and needs no OpenAI key. It assumes `qwen3.5:4b` is installed. Run the lines in order in one shell:
+
+```sh
+S=$(mktemp -d)                                  # remove it yourself when finished: rm -r "$S"
+run() { env -u OPENAI_API_KEY HOME="$S/home" XDG_STATE_HOME="$S/state" XDG_CONFIG_HOME="$S/config" node dist/cli.js "$@"; }
+
+# 1. two turns, then exit (the second answer should use the first for context)
+printf 'My name is Ada. Reply with one word.\nWhat is my name? Reply with one word.\n/exit\n' | run --provider ollama --model qwen3.5:4b --usage
+
+# 2. restart without flags: restores the conversation (shows the "Restored conversation" notice)
+printf 'And what did I ask you first? Reply briefly.\n/usage\n/exit\n' | run
+find "$S/state" -type f | sort                  # one conversation file and active.json; modes 600/700
+
+# 3. /reset keeps the old file and saves a fresh empty one
+printf '/reset\n/usage\n/exit\n' | run
+find "$S/state" -name '*.json' | wc -l          # now 3 files (2 conversations + active.json)
+
+# 4. an intentionally incomplete reply (tiny output limit): partial text, warning, chat continues
+printf 'Count from 1 to 100.\n/usage\n/exit\n' | run --provider ollama --model qwen3.5:4b --max-output-tokens 8 --reasoning-effort none --usage
+
+# 5. --no-history: touches nothing under the state tree
+find "$S/state" -type f | sort > "$S/before.txt"
+printf 'Say hi.\n/exit\n' | run --no-history --provider ollama --model qwen3.5:4b
+find "$S/state" -type f | sort | diff - "$S/before.txt" && echo unchanged
+
+# 6. cleanup with confirmation (only the isolated tree is listed and deleted)
+printf '/cleanup\nno\n/cleanup\nyes\n/exit\n' | run --provider ollama --model qwen3.5:4b
+find "$S/state" -type f | sort                  # only active.json remains
+```
+
+Optional, only if you want to try OpenAI yourself (real, billable requests; uses the same isolated tree):
+
+```sh
+export OPENAI_API_KEY=...   # your real key
+printf 'Reply with the single word: ok\n/usage\n/exit\n' | run --provider openai --usage
+```
 
 ### Manual smoke test (owner-run, makes real, billable requests)
 
@@ -98,13 +138,13 @@ The installed SDK also reads `OPENAI_BASE_URL`, `OPENAI_ORG_ID`, `OPENAI_PROJECT
 | `npm run lint` | ESLint (flat config, type-aware `typescript-eslint`) |
 | `npm test` | build, compile tests to `.test-dist/`, run them with `node:test` |
 | `npm run check` | typecheck, lint, then `npm test` (build included) |
-| `npm run test:parity` | optional: storage codecs against the read-only Python reference (needs Python; exits 3 = blocked when unavailable; not part of `check`) |
+| `npm run test:parity` | optional: storage codecs and TS chat sessions against the read-only Python reference (needs Python; exits 3 = blocked when unavailable; not part of `check`) |
 
 Tests include unit tests, runner tests with injected writers, and integration tests that spawn `dist/cli.js` with `process.execPath`, a sanitized environment, and temporary `HOME`/`XDG_*` directories. They contact only loopback mock servers (never OpenAI, never a real Ollama) and read no user data or credentials.
 
 ## Planned milestones
 
-Connecting history and settings to the CLI, interactive chat, streaming, pricing, and a terminal UI come in later tasks (OpenAI and Ollama one-shot are done). Version plan: `0.1.0` completed CLI Foundation; `0.2.0-dev` while working on chat/history/streaming, `0.2.0` when that milestone is complete; `0.3.0-dev`/`0.3.0` for the TUI; `0.4.0-dev`/`0.4.0` for full parity. See `docs/architecture.md` and `docs/parity.md`.
+Streaming, pricing and cost estimates, provider/model switching and a terminal UI come in later tasks (OpenAI and Ollama one-shot and the plain chat with history are done). Version plan: `0.1.0` completed CLI Foundation; `0.2.0-dev` while working on chat/history/streaming, `0.2.0` when that milestone is complete; `0.3.0-dev`/`0.3.0` for the TUI; `0.4.0-dev`/`0.4.0` for full parity. See `docs/architecture.md` and `docs/parity.md`.
 
 ## Working documents
 

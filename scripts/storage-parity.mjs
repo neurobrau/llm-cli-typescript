@@ -121,6 +121,17 @@ async function main() {
     }
   }
 
+  // 1b. Files produced by real TS chat sessions (fake provider, temporary state), and a
+  //     Python-written conversation continued by a TS session. They join the TS -> Python check below.
+  const liveConversation = join(generated, "conversation_py_big_counts.json");
+  const pythonConversation = existsSync(liveConversation) ? liveConversation : join(ROOT, "tests", "fixtures", "storage", "python", "conversation_ollama_unicode.json");
+  const { sessionFiles, sessionFailures } = await sessionChecks(codecs, pythonConversation);
+  failures.push(...sessionFailures);
+  for (const [name, bytes] of sessionFiles) {
+    writeFileSync(join(tsWritten, `ts-session__${name}`), bytes);
+    checked += 1;
+  }
+
   // 2. TS-encoded bytes through the Python readers and writers.
   const names = readdirSync(tsWritten).sort();
   const forPython = join(scratch, "for-python");
@@ -154,4 +165,99 @@ async function main() {
     return;
   }
   console.log("PASS: byte-identical in every checked direction");
+}
+
+// ----- chat sessions -----
+
+function fakeProvider(id, answers) {
+  const seen = [];
+  return {
+    id,
+    label: id,
+    seen,
+    async generate(request) {
+      seen.push(request.messages.map((message) => `${message.role}:${message.content}`));
+      return answers[seen.length - 1] ?? { kind: "completed", result: { text: `answer ${String(seen.length)}` } };
+    },
+    stream() {
+      throw new Error("streaming is not part of this check");
+    },
+    async listModels() {
+      return [];
+    },
+    async checkAvailability() {
+      return { available: true, message: "" };
+    },
+    async defaultModel() {
+      return "m";
+    },
+    async getCapabilities() {
+      return { reasoning: { known: false, values: [], allowsModelDefault: true } };
+    },
+  };
+}
+
+async function runSession(main, root, argv, lines, provider) {
+  const queue = [...lines];
+  let ticks = 0;
+  const code = await main.run(argv, { stdout: () => undefined, stderr: () => undefined }, {
+    createProvider: () => provider,
+    createInput: () => ({ readLine: async () => queue.shift(), dispose() {} }),
+    storageEnvironment: { env: { XDG_STATE_HOME: join(root, "state"), XDG_CONFIG_HOME: join(root, "config") } },
+    clock: () => new Date(Date.UTC(2026, 9, 23, 10, 0, ticks++)),
+    newId: (() => {
+      let n = 0;
+      return () => `00000000-0000-4000-8000-${String(++n).padStart(12, "0")}`;
+    })(),
+  });
+  return code;
+}
+
+async function sessionChecks(codecs, pythonConversation) {
+  const main = await import(pathToFileURL(join(ROOT, "dist", "main.js")).href);
+  const failures = [];
+  const files = new Map();
+  const collect = (root, prefix) => {
+    const conversations = join(root, "state", "neurobrau", "conversations");
+    for (const name of readdirSync(conversations).sort()) {
+      files.set(`conversation_${prefix}_${name}`, readFileSync(join(conversations, name)));
+    }
+    files.set(`active_${prefix}.json`, readFileSync(join(root, "state", "neurobrau", "active.json")));
+  };
+
+  // A fresh session: unicode/control text, huge exact counts, an empty tier, an incomplete record, then /reset.
+  const fresh = join(scratch, "session-fresh");
+  const big = 2n ** 70n + 5n;
+  const provider = fakeProvider("ollama", [
+    { kind: "completed", result: { text: 'ctrl \u0001 \u001f "q" \\ \r\n\t \u{1F600} é', usage: { inputTokens: big, outputTokens: 0n, cachedInputTokens: 3n }, serviceTier: "" } },
+    { kind: "incomplete", reason: "limit", partialText: "part", usage: { outputTokens: 9007199254740993n } },
+  ]);
+  const code = await runSession(main, fresh, ["--provider", "ollama", "--model", "hf.co/org/model:Q4_K_M"], ['q1 "x" \u{1F600}', "q2", "/reset", "/exit"], provider);
+  if (code !== 0) failures.push(`TS session exited ${String(code)}`);
+  collect(fresh, "fresh");
+
+  // A Python-written conversation continued by TS: context sent, prior records kept exactly.
+  const continued = join(scratch, "session-continued");
+  const conversations = join(continued, "state", "neurobrau", "conversations");
+  mkdirSync(conversations, { recursive: true });
+  const original = readFileSync(pythonConversation);
+  const decoded = codecs.decodeConversation(original);
+  writeFileSync(join(conversations, `${decoded.id}.json`), original);
+  const continuer = fakeProvider("ollama", [{ kind: "completed", result: { text: "ok", usage: { inputTokens: 5n } } }]);
+  const code2 = await runSession(main, continued, [], ["continue please", "/exit"], continuer);
+  if (code2 !== 0) failures.push(`TS continuation exited ${String(code2)}`);
+  const expectedContext = [...decoded.messages.map((m) => `${m.role}:${m.content}`), "user:continue please"];
+  if (JSON.stringify(continuer.seen[0]) !== JSON.stringify(expectedContext)) {
+    failures.push("continuation: the request did not carry the Python conversation context");
+  }
+  const after = codecs.decodeConversation(readFileSync(join(conversations, `${decoded.id}.json`)));
+  const keptRecords = after.requests.slice(0, decoded.requests.length);
+  if (JSON.stringify(keptRecords, (_k, v) => (typeof v === "bigint" ? `${v}n` : v)) !== JSON.stringify(decoded.requests, (_k, v) => (typeof v === "bigint" ? `${v}n` : v))) {
+    failures.push("continuation: prior usage records changed");
+  }
+  if (after.messages.length !== decoded.messages.length + 2 || after.requests.length !== decoded.requests.length + 1) {
+    failures.push("continuation: unexpected message or record count");
+  }
+  collect(continued, "continued");
+  return { sessionFiles: files, sessionFailures: failures };
 }

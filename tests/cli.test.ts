@@ -88,8 +88,8 @@ void describe("built CLI (dist/cli.js)", () => {
     assert.ok(!existsSync(join(ROOT, "dist", "src")));
   });
 
-  void it("shows help for no arguments and for --help / -h", async () => {
-    for (const args of [[], ["--help"], ["-h"]]) {
+  void it("shows help for --help / -h", async () => {
+    for (const args of [["--help"], ["-h"]]) {
       const result = await runCli(args);
       assert.equal(result.code, 0);
       assert.equal(result.stderr, "");
@@ -118,7 +118,8 @@ void describe("built CLI (dist/cli.js)", () => {
       { args: ["--bogus"], pattern: /unknown option "--bogus"/ },
       { args: [""], pattern: /prompt must not be empty/ },
       { args: ["a", "b"], pattern: /unsupported positional arguments/ },
-      { args: ["--usage"], pattern: /prompt is required/ },
+      { args: ["--plain", "p"], pattern: /cannot be used with a prompt/ },
+      { args: ["--no-history", "p"], pattern: /cannot be used with a prompt/ },
       { args: ["--provider", "other", "p"], pattern: /invalid provider "other"/ },
       { args: ["--help", "--version"], pattern: /conflicting options/ },
       { args: ["--version", "x"], pattern: /invalid invocation/ },
@@ -155,7 +156,7 @@ void describe("built CLI (dist/cli.js)", () => {
   void it("does not read credentials for help, version or invalid invocations", async () => {
     // A key that would be rejected loudly if used; none of these invocations may touch it.
     const env = { OPENAI_API_KEY: "sk-synthetic-not-used-000000" };
-    for (const args of [[], ["--version"], ["--bogus"], ["--provider", "other", "p"], ["--usage"]]) {
+    for (const args of [["--version"], ["--bogus"], ["--provider", "other", "p"], ["--plain", "p"]]) {
       const result = await runCli(args, ROOT, env);
       assert.ok(!result.stdout.includes("sk-synthetic") && !result.stderr.includes("sk-synthetic"));
     }

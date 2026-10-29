@@ -1,6 +1,6 @@
 import type { Writable } from "node:stream";
 
-import type { InterruptSource, Writer } from "./main.js";
+import type { InterruptSource, Writer } from "./io.js";
 
 /**
  * Wraps a stream so each write resolves when the chunk is flushed and rejects
@@ -30,10 +30,15 @@ export function createWriter(stream: Writable): Writer {
     });
 }
 
-/** SIGINT is handled only while a one-shot operation runs; afterwards the default OS behavior returns. */
+/**
+ * SIGINT is handled only between `register` and the returned unregister
+ * function (one-shot operation or chat run); afterwards the default OS
+ * behavior returns. The callback may fire repeatedly: an interactive chat
+ * needs every Ctrl+C, and a one-shot run is bounded by its cleanup timeout.
+ */
 export const sigintSource: InterruptSource = {
   register(onInterrupt) {
-    process.once("SIGINT", onInterrupt);
+    process.on("SIGINT", onInterrupt);
     return () => {
       process.removeListener("SIGINT", onInterrupt);
     };

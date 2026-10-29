@@ -33,15 +33,15 @@ function epipe(): Error {
 }
 
 void describe("run", () => {
-  void it("prints help on stdout for no arguments, --help and -h", async () => {
-    for (const argv of [[], ["--help"], ["-h"]]) {
+  void it("prints help on stdout for --help and -h", async () => {
+    for (const argv of [["--help"], ["-h"]]) {
       const { io, out, err } = capture();
       assert.equal(await run(argv, io), 0);
       assert.equal(err.length, 0);
       const text = out.join("");
       assert.match(text, /^usage: neurobrau /);
       assert.match(text, /--version/);
-      assert.match(text, /no arguments, this help is shown/);
+      assert.match(text, /Without a prompt, starts a line-oriented chat/);
     }
   });
 
@@ -58,7 +58,7 @@ void describe("run", () => {
       [""],
       ["   "],
       ["a", "b"],
-      ["--usage"],
+      ["--plain", "p"],
       ["--stream", "p"],
       ["--provider", "other", "p"],
       ["--help", "--version"],

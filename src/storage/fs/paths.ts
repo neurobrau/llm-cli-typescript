@@ -64,6 +64,50 @@ export function resolveStoragePaths(input: StoragePathInput): StoragePaths {
   };
 }
 
+export type ComponentPath<T> = { readonly ok: true; readonly value: T } | { readonly ok: false; readonly error: StoragePathError };
+
+export interface ComponentPaths {
+  /** The conversations directory and `active.json` (both in the state base). */
+  readonly history: ComponentPath<{ readonly conversations: string; readonly active: string }>;
+  /** `settings.json` (config base). */
+  readonly settings: ComponentPath<string>;
+}
+
+function attempt<T>(compute: () => T): ComponentPath<T> {
+  try {
+    return { ok: true, value: compute() };
+  } catch (error: unknown) {
+    if (error instanceof StoragePathError) {
+      return { ok: false, error };
+    }
+    throw error;
+  }
+}
+
+/**
+ * Like `resolveStoragePaths`, but each component fails on its own: a valid
+ * absolute `XDG_STATE_HOME` keeps history usable when settings cannot be
+ * located (no config base and no home), and the other way round. Same rules,
+ * same purity; the existing function is unchanged.
+ */
+export function resolveStorageComponents(input: StoragePathInput): ComponentPaths {
+  return {
+    history: attempt(() => {
+      const state = lookup(input.env, "XDG_STATE_HOME");
+      checkNul(state);
+      if (state === undefined || !isAbsolute(state)) checkNul(input.home);
+      const app = join(base(state, input.home, [".local", "state"]), APP_DIR);
+      return { conversations: join(app, "conversations"), active: join(app, "active.json") };
+    }),
+    settings: attempt(() => {
+      const config = lookup(input.env, "XDG_CONFIG_HOME");
+      checkNul(config);
+      if (config === undefined || !isAbsolute(config)) checkNul(input.home);
+      return join(base(config, input.home, [".config"]), APP_DIR, "settings.json");
+    }),
+  };
+}
+
 /** A new canonical lowercase version-4 UUID. Creates nothing and reads no clock. */
 export function newConversationId(): string {
   return randomUUID();

@@ -1,22 +1,23 @@
 # Architecture
 
-Status: `0.2.0-dev` (milestone 0.2 in progress). The completed CLI Foundation (`0.1.0`: non-streaming OpenAI and Ollama one-shot) is behavior-preserved; internal storage codecs exist but are not wired in. No tag or release has been created or published.
+Status: `0.2.0-dev` (milestone 0.2 in progress). The completed CLI Foundation (`0.1.0`: non-streaming OpenAI and Ollama one-shot) is behavior-preserved; the non-streaming plain chat with persistent history and read-only saved settings is connected (Task 006). No tag or release has been created or published.
 
 ## CLI composition
 
 | Module | Responsibility |
 | --- | --- |
 | `src/cli.ts` | Executable entry. The only top-level process wiring: wraps `process.stdout`/`stderr` into async writers, calls `run`, assigns `process.exitCode`. |
-| `src/main.ts` | `run(argv, io)` returns an exit code. Writers are injected; it never calls `process.exit()`. Maps `EPIPE` to 141 and other output failures to 1. |
-| `src/args.ts` | Pure parsing of argv into `help`, `version`, or `error`. No I/O, no throwing for user input. |
+| `src/main.ts` | `run(argv, io, deps)` returns an exit code. Writers and every dependency are injected; it never calls `process.exit()`. Dispatches help/version/error, the one-shot prompt, and the chat. Maps `EPIPE` to 141 and other output failures to 1. |
+| `src/io.ts` | Shared writer/interrupt contracts, exit-code constants and the output-failure wrapper. |
+| `src/args.ts` | Pure parsing of argv into `help`, `version`, `prompt` (one-shot), `chat` or `error`. No I/O, no throwing for user input. The chat invocation keeps `provider` only when `--provider` was given. |
 | `src/help.ts` | Deterministic help, version, and usage-hint text. |
 | `src/version.ts` | Reads `package.json` (the sole version authority), found relative to the module location, never `process.cwd()`. |
 
-Importing any non-entry module prints nothing and registers no listeners; the version file is read only when `run` needs it. The writer in `cli.ts` awaits each write (backpressure) and installs an `error` listener that only records the failure, because an unhandled stream `error` event would otherwise crash the process before the exit code can be set. SIGINT keeps its default OS behavior.
+Importing any non-entry module prints nothing and registers no listeners; the version file is read only when `run` needs it. The writer in `cli.ts` awaits each write (backpressure) and installs an `error` listener that only records the failure, because an unhandled stream `error` event would otherwise crash the process before the exit code can be set. SIGINT is handled only between `register` and the returned unregister call (one-shot run or chat run); the callback can fire repeatedly. Importing any module installs no listener.
 
 ## Argument parsing
 
-`node:util` `parseArgs` runs in non-strict token mode; the parser then classifies tokens itself. This gives the required distinct diagnostics (unknown vs. deliberately unsupported future options, values on boolean flags, conflicts) that strict mode would collapse into one error. Options of the Python/Go editions that are not implemented yet (`--stream`, `--plain`, …) are listed explicitly and rejected rather than ignored.
+`node:util` `parseArgs` runs in non-strict token mode; the parser then classifies tokens itself. This gives the required distinct diagnostics (unknown vs. deliberately unsupported future options, values on boolean flags, conflicts) that strict mode would collapse into one error. Options of the Python/Go editions that are not implemented yet (`--stream`, `--transcript-on-exit`) are listed explicitly and rejected rather than ignored.
 
 ## ESM, compiler, and tests
 
@@ -101,11 +102,33 @@ Used by the one-shot path below.
 
 ## Storage codecs (Task 005A)
 
-`src/storage/` holds pure codecs for conversations, `active.json`, `settings.json` and usage records: lossless integers (`bigint` from `JSON.parse` source lexemes), strict RFC 3339 timestamps, validation with typed `StorageCodecError`s, and Python-compatible canonical output. It imports nothing from Node (no fs, env, clock, network) and is not used by `main.ts`, `cli.ts` or any provider. Details, boundaries and the parity check: `docs/storage.md`. Sessions and chat come after Task 005B.
+`src/storage/` holds pure codecs for conversations, `active.json`, `settings.json` and usage records: lossless integers (`bigint` from `JSON.parse` source lexemes), strict RFC 3339 timestamps, validation with typed `StorageCodecError`s, and Python-compatible canonical output. It imports nothing from Node (no fs, env, clock, network) and no provider uses it; the chat reaches it only through `src/application/`. Details, boundaries and the parity check: `docs/storage.md`.
 
 ## Filesystem storage (Task 005B)
 
-`src/storage/fs/` is a separate, explicit entry point (`src/storage/fs/index.ts`) over `node:fs/promises`, `node:path` and `node:crypto`: injected XDG path resolution, one atomic writer (rename is the commit point), `HistoryStore` (conversations plus `active.json`), `SettingsStore` (an explicit load-before-save state machine) and UUID creation. Nothing runs at import or construction, the pure codecs never import it, and it is not wired into the CLI: one-shot behavior is unchanged. Per-instance write operations are serialized in invocation order; independent instances are last-writer-wins. See `docs/storage.md`.
+`src/storage/fs/` is a separate, explicit entry point (`src/storage/fs/index.ts`) over `node:fs/promises`, `node:path` and `node:crypto`: injected XDG path resolution, one atomic writer (rename is the commit point), `HistoryStore` (conversations plus `active.json`), `SettingsStore` (an explicit load-before-save state machine) and UUID creation. Nothing runs at import or construction, the pure codecs never import it, and one-shot behavior never uses it. Per-instance write operations are serialized in invocation order; independent instances are last-writer-wins. See `docs/storage.md`.
+
+## Plain chat, sessions and persistence (Task 006)
+
+Layers (dependencies point downward; nothing below knows the layers above):
+
+| Module | Responsibility |
+| --- | --- |
+| `src/chat/run-chat.ts` | One chat run: creates the input, registers the interrupt callback, calls startup, runs the loop, maps startup failures to the one-shot exit codes (3-7, 2, 1) and unexpected failures to a fixed message. |
+| `src/chat/plain-chat.ts` | The loop and rendering (banner, `AI >`, warnings, commands, cleanup dialog, cancellation, bounded cleanup). Composes `provider.generate` with the session; the only place that prints. |
+| `src/chat/commands.ts` | Pure command parsing and fixed texts. |
+| `src/application/chat-startup.ts` | Path resolution, restore selection, provider creation, model default, settings load, saved-limit conversion and strict resolution. Returns warnings in order; writes nothing. |
+| `src/application/session.ts` | `ChatSession`: committed messages, usage records, identity and persistence. Prints nothing, calls no provider, owns no clock/ID source. |
+| `src/application/usage-report.ts` | Token-only report with bigint sums. |
+| `src/line-input.ts` | `LineReader`: bounded, incremental UTF-8 line splitting over a stream it does not own. |
+
+**Injection.** `run` takes `createProvider`, `createInput`, `storageEnvironment` (env + home), `clock`, `newId`, `createHistoryStore`, `createSettingsStore`, `checkProviderReady`, `interrupt` and `cleanupTimeoutMs`. Without them the defaults are inert: no input (immediate EOF), an environment without a home (history and settings disabled with warnings), and no real provider. Only `src/cli.ts` reads `process.env`, `homedir()`, `process.stdin` and wires SIGINT. The `SettingsPort` given to startup has no `save`; the chat cannot write settings.
+
+**Session rules.** `messagesFor(text)` = committed messages plus the pending user message (never committed early). `applyCompleted` / `applyIncomplete` are synchronous in-memory commits; `persist`, `reset`, `cleanup` and `countSaved` are serialized in call order and awaited. Storage failures are returned as warnings and never undo memory; other exceptions propagate (bugs are not hidden). Snapshots copy messages, records, nested usage and Dates.
+
+**Request lifecycle.** One request at a time. After the provider call returns, the loop checks `signal.aborted` and applies the commit in the same synchronous step, so a response that lost the race against an interrupt is discarded. Persistence then runs to completion before the answer is printed and before the chat can exit; an interrupt during it only requests the exit (130). After an interrupt the chat waits at most `cleanupTimeoutMs` for the provider to settle; a provider that ignores the abort ends the chat (130), and its late result can reach nothing because the commit happens in the loop. Lines that arrive meanwhile stay in the (paused, bounded) input and are processed in order; EOF never cancels an accepted request.
+
+**Not implemented:** streaming, pricing, switching providers/models in a session (and parked conversations), TUI, `--transcript-on-exit`.
 
 ## Versioning
 

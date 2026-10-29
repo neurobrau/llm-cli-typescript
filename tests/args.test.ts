@@ -21,9 +21,9 @@ function invocation(argv: readonly string[]): PromptInvocation {
 }
 
 void describe("parseCliArgs: help and version", () => {
-  void it("shows help without arguments and for bare --", () => {
-    assert.deepEqual(parseCliArgs([]), { kind: "help" });
-    assert.deepEqual(parseCliArgs(["--"]), { kind: "help" });
+  void it("starts the chat, not help, without arguments and for bare --", () => {
+    assert.deepEqual(parseCliArgs([]), { kind: "chat", invocation: { usage: false, noHistory: false } });
+    assert.deepEqual(parseCliArgs(["--"]), { kind: "chat", invocation: { usage: false, noHistory: false } });
   });
 
   void it("accepts --help, -h and --version", () => {
@@ -71,7 +71,7 @@ void describe("parseCliArgs: unsupported and unknown options", () => {
   });
 
   void it("rejects future options explicitly, before looking at values", () => {
-    for (const argv of [["--stream", "p"], ["--plain", "p"], ["--no-history", "p"], ["--transcript-on-exit", "p"]]) {
+    for (const argv of [["--stream", "p"], ["--transcript-on-exit", "p"], ["--stream"], ["--transcript-on-exit"]]) {
       assert.match(errorMessage(argv), /unsupported option/, JSON.stringify(argv));
     }
   });
@@ -160,9 +160,15 @@ void describe("parseCliArgs: one-shot prompts", () => {
     assert.equal(invocation(["  keep  spaces\n"]).prompt, "  keep  spaces\n");
   });
 
-  void it("requires a prompt when generation options are given", () => {
+  void it("treats generation options without a prompt as options of the chat", () => {
     for (const argv of [["--usage"], ["--model", "m"], ["--provider", "openai"], ["--answer-style", "brief"]]) {
-      assert.match(errorMessage(argv), /prompt is required/, JSON.stringify(argv));
+      assert.equal(parseCliArgs(argv).kind, "chat", JSON.stringify(argv));
+    }
+  });
+
+  void it("rejects the chat-only switches together with a prompt", () => {
+    for (const argv of [["--plain", "p"], ["--no-history", "p"], ["p", "--plain", "--no-history"]]) {
+      assert.match(errorMessage(argv), /cannot be used with a prompt/, JSON.stringify(argv));
     }
   });
 

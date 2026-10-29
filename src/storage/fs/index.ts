@@ -19,7 +19,7 @@ export { cleanupFailuresOf, displayPath, StorageIoError, StoragePathError } from
 export type { CleanupFailure, StorageOperation, StorageSubject } from "./errors.js";
 export { nodeFs } from "./node-fs.js";
 export type { EntryInfo, EntryKind, StorageFs, WritableFile } from "./node-fs.js";
-export { newConversationId, resolveStoragePaths } from "./paths.js";
-export type { StorageEnvironment, StoragePathInput, StoragePaths } from "./paths.js";
+export { newConversationId, resolveStorageComponents, resolveStoragePaths } from "./paths.js";
+export type { ComponentPath, ComponentPaths, StorageEnvironment, StoragePathInput, StoragePaths } from "./paths.js";
 export { SettingsStore } from "./settings-store.js";
 export type { SettingsLoad, SettingsSave, SettingsStoreOptions } from "./settings-store.js";

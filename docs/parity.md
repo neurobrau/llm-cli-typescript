@@ -2,7 +2,7 @@
 
 ## Current scope and limitations
 
-`0.2.0-dev` (the completed `0.1.0` CLI Foundation behavior is unchanged) implements `-h`/`--help`, `--version` and a non-streaming one-shot prompt for OpenAI and Ollama (`--provider openai|ollama`). Not implemented: chat, history and settings storage, streaming (`--stream` is rejected), pricing, model-discovery commands, terminal UI, `--plain`, `--no-history`, `--transcript-on-exit`. Exit codes 1-8, 130 and 141 are produced for the one-shot path.
+`0.2.0-dev` (the completed `0.1.0` CLI Foundation behavior is unchanged) implements `-h`/`--help`, `--version`, a non-streaming one-shot prompt for OpenAI and Ollama (`--provider openai|ollama`), and the non-streaming plain chat (`--plain`, `--no-history`) with persistent history and read-only saved settings. Not implemented: streaming (`--stream` is rejected), pricing and cost estimates, provider/model switching, model-discovery commands, terminal UI, `--transcript-on-exit`. Exit codes 1-8, 130 and 141 are produced for the one-shot path.
 
 ## References
 
@@ -62,6 +62,23 @@ Full table and rationale in `docs/storage.md`. Summary: counts and saved token l
 ## Filesystem storage differences (Task 005B)
 
 Details in `docs/storage.md`. Intentional differences from the references: only regular files directly inside the conversations directory are considered (symlinks, FIFOs and subdirectories are ignored, where the references list every `*.json` name); symlinks or non-directories at application-owned directory locations are refused (references follow them); settings own their containing directory whatever its name; saving settings before a load is refused, and a failed whole-file load disables saving permanently for the instance, including against later loads; writes of one instance are serialized in invocation order; `mtime` ties use bigint nanoseconds; messages use fixed reasons and escaped paths. Behavior kept from the references: canonical bytes, `0700`/`0600` modes, the temp-file naming, rename as commit with best-effort directory fsync, unknown stored provider strings, a file name differing from its internal id, no rewriting on load, last writer wins across instances. Go serializers and the CLI-level restore flow remain for the consolidated parity gate.
+
+## Plain chat differences (Task 006)
+
+References: Python `session.py`, `chat.py`, `cli.py`, `usage.py`, `docs/tui-spec.md` §§1, 8, 9, 11, 13, 15, 16; Go `internal/session`, `internal/chat`, `internal/cli/interactive.go`. Kept: banner and labels, notices, command set and aliases, restore rules and active selection, save-after-completed-exchange, reset/cleanup semantics, incomplete-usage save policy, warnings on stderr, exit codes.
+
+- No fullscreen TUI: every interactive run is the plain chat, also on a terminal (`--plain` is accepted and redundant). Cost estimates are not implemented: `/usage` is token-only and says so (Python/Go print an estimated cost).
+- `--usage` also prints usage after incomplete replies (Go/Python only after completed ones).
+- `--plain`/`--no-history` with a prompt are rejected (exit 2); Python/Go silently ignore them.
+- Restore: conversations of unknown providers are skipped (Go) and never rewritten; a valid active selection without a conversation never falls back to an unrelated one; unknown-provider and invalid `active.json` are warnings.
+- Settings are read-only in the chat (Go writes them only from the TUI). A saved limit above `Number.MAX_SAFE_INTEGER` is ignored with a notice (file untouched); the references read it as a plain integer.
+- Missing home: history and settings are disabled independently; Python/Go warn the same way but resolve XDG bases independently only per call.
+- The OpenAI key is checked for presence only (no validation, no Models request) before the banner; Python/Go do the same presence check.
+- Cancellation: Ctrl+C aborts the request (`AbortController`) and waits at most a bounded time; Go waits for the goroutine without a bound. A response that lost the race against an interrupt is discarded. After a response is committed, Ctrl+C waits for the save and then exits 130.
+- Input is read through a bounded, paused-when-full reader; the references read synchronously (Python `input()`) or via a goroutine. EOF while a request is in flight does not cancel it. A read error exits 1 (Go treats it as EOF).
+- Saving and printing order: the exchange is committed and saved first, then printed (as Go).
+- `/cleanup` with a partial failure keeps the in-memory session (Go) and prints the number already deleted.
+- Verified against Python: `npm run test:parity` loads TS-session-written files with the Python readers and checks the Python writer reproduces the bytes, and continues a Python-written conversation through a TS session. The Go serializers are not executed (deferred to the consolidated gate).
 
 ## Proposed future decisions (not implemented, not yet accepted by the owner)
 
