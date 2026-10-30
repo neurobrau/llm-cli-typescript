@@ -393,6 +393,36 @@ void describe("plain chat: persistence outcomes", () => {
 void describe("plain chat: output failures", () => {
   const epipe = (): Error => Object.assign(new Error("write EPIPE"), { code: "EPIPE" });
 
+  void it("a throwing input constructor unregisters the interrupt once, starts nothing and exposes nothing", async () => {
+    const provider = new ScriptedProvider("openai");
+    const history = new MemoryHistory();
+    const interrupts = fakeInterrupts();
+    let checked = 0;
+    const run = await runChat([], provider, new ManualInput([]), {
+      tree,
+      deps: {
+        interrupt: interrupts.source,
+        createHistoryStore: () => history,
+        checkProviderReady: () => {
+          checked += 1;
+        },
+        createInput: () => {
+          throw new Error("SYNTHETIC-SECRET-input-failure");
+        },
+      },
+    });
+    assert.equal(run.code, 1);
+    assert.equal(interrupts.registered(), 1);
+    assert.equal(interrupts.active(), 0);
+    assert.equal(provider.calls, 0);
+    assert.equal(provider.capabilityCalls.length, 0);
+    assert.equal(checked, 0);
+    assert.deepEqual(history.calls, []);
+    assert.equal(run.out, "");
+    assert.equal(run.err, "neurobrau: error: an internal error occurred\n");
+    assert.ok(!run.log.join("").includes("SYNTHETIC-SECRET"));
+  });
+
   void it("exits 141 quietly when stdout is closed at the banner, with no request", async () => {
     const provider = new ScriptedProvider("openai");
     const run = await runChat(["--no-history"], provider, new ManualInput(["q"]), { tree, onWrite: (stream) => { if (stream === "out") throw epipe(); } });

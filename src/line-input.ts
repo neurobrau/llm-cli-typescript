@@ -78,7 +78,7 @@ export class LineReader implements LineInput {
     if (this.failure === undefined) {
       const tail = this.partial + this.decoder.decode();
       this.partial = "";
-      if (tail !== "") this.lines.push(stripCarriageReturn(tail));
+      if (tail !== "") this.accept(tail);
     }
     this.ended = true;
     this.wake();
@@ -130,19 +130,35 @@ export class LineReader implements LineInput {
   }
 
   private feed(text: string): void {
-    let buffer = this.partial + text;
+    const buffer = this.partial + text;
     let start = 0;
     for (let index = buffer.indexOf("\n", start); index !== -1; index = buffer.indexOf("\n", start)) {
-      this.lines.push(stripCarriageReturn(buffer.slice(start, index)));
+      if (!this.accept(buffer.slice(start, index))) {
+        this.partial = ""; // lines accepted before the oversized one stay deliverable
+        return;
+      }
       start = index + 1;
     }
-    buffer = buffer.slice(start);
-    if (buffer.length > this.maxLine) {
+    const rest = buffer.slice(start);
+    // An unfinished line may end in the CR of a CRLF whose LF has not arrived yet.
+    if (stripCarriageReturn(rest).length > this.maxLine) {
       this.failure = new InputError("line-too-long");
-      buffer = "";
+      this.partial = "";
+      return;
     }
-    this.partial = buffer;
+    this.partial = rest;
     this.syncFlow();
+  }
+
+  /** Queues one complete line (terminator removed); false, with the failure recorded, if it is too long. */
+  private accept(raw: string): boolean {
+    const line = stripCarriageReturn(raw);
+    if (line.length > this.maxLine) {
+      this.failure = new InputError("line-too-long");
+      return false;
+    }
+    this.lines.push(line);
+    return true;
   }
 
   /** Reads only when the consumer is waiting or the buffer is low. */

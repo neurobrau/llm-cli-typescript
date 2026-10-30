@@ -25,8 +25,9 @@ export async function runChat(invocation: ChatInvocation, io: Io, deps: ChatRunD
     if (chat === undefined) startup.abort();
     else chat.interrupt();
   });
-  const input = deps.createInput();
+  let input: LineInput | undefined;
   try {
+    input = deps.createInput();
     let started;
     try {
       started = await startChat(invocation, deps, startup.signal);
@@ -53,7 +54,7 @@ export async function runChat(invocation: ChatInvocation, io: Io, deps: ChatRunD
     return await fixedFailure(error, io);
   } finally {
     unregister?.();
-    input.dispose();
+    input?.dispose();
   }
 }
 

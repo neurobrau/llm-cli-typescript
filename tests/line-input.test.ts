@@ -91,6 +91,48 @@ void describe("LineReader", () => {
     reader.dispose();
   });
 
+  void describe("maximum line length applies to every line", () => {
+    const tooLong = (error: unknown): boolean => error instanceof InputError && error.reason === "line-too-long";
+    const endsIn = async (chunks: readonly string[], valid: readonly string[], end: boolean): Promise<void> => {
+      const stream = new PassThrough();
+      const reader = new LineReader(stream, { maxLineLength: 8 });
+      for (const chunk of chunks) {
+        stream.write(chunk);
+        await new Promise((resolve) => setImmediate(resolve));
+      }
+      if (end) stream.end();
+      for (const line of valid) assert.equal(await reader.readLine(), line);
+      await assert.rejects(reader.readLine(), tooLong);
+      await assert.rejects(reader.readLine(), tooLong); // stays failed, never yields the oversized text
+      reader.dispose();
+    };
+
+    void it("rejects a complete LF line in one chunk and keeps the lines before it", async () => {
+      await endsIn(["ok\n123456789\nnever\n"], ["ok"], false);
+    });
+    void it("rejects a complete CRLF line in one chunk", async () => {
+      await endsIn(["ok\r\n123456789\r\nnever\r\n"], ["ok"], false);
+    });
+    void it("rejects an oversized last line at EOF", async () => {
+      await endsIn(["ok\n123456789"], ["ok"], true);
+    });
+    void it("rejects equivalent split-chunk input", async () => {
+      await endsIn(["ok\n1234", "56789", "\nnever\n"], ["ok"], false);
+      await endsIn(["ok\r\n1234", "56789\r", "\nnever\n"], ["ok"], false);
+    });
+    void it("accepts a line of exactly the limit, with LF, CRLF or a split CR, and at EOF", async () => {
+      const stream = new PassThrough();
+      const reader = new LineReader(stream, { maxLineLength: 8 });
+      stream.write("12345678\n12345678\r\n12345678\r");
+      await new Promise((resolve) => setImmediate(resolve));
+      stream.write("\n12345678");
+      stream.end();
+      for (let i = 0; i < 4; i += 1) assert.equal(await reader.readLine(), "12345678");
+      assert.equal(await reader.readLine(), undefined);
+      reader.dispose();
+    });
+  });
+
   void it("dispose removes every listener, pauses and does not destroy a caller-owned stream", async () => {
     const stream = new PassThrough();
     const before = listeners(stream);
