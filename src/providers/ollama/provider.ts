@@ -1,14 +1,17 @@
 import { ProviderError, createAbortError, ensureNotAborted } from "../../domain/errors.js";
+import { eventStream } from "../event-stream.js";
 import { snapshotRequest } from "../../domain/generation.js";
 import type { GenerationOutcome, GenerationRequest, ProviderId, StreamEvent } from "../../domain/generation.js";
 import type { Availability, ModelInfo, Provider } from "../../domain/provider.js";
 import type { ModelCapabilities } from "../../domain/settings.js";
 import { safeText } from "../redact.js";
+import { HttpStatusError, errorDetail, explainNotFound, pullHint } from "./errors.js";
 import { invalidResponse, isCloudName, isSelectable, parseChatResponse, parseShow, parseTags } from "./parse.js";
 import type { ShowInfo, TagEntry } from "./parse.js";
 import { reasoningSupport, thinkField } from "./thinking.js";
-import { nodeTransport } from "./transport.js";
-import type { Transport } from "./transport.js";
+import { OllamaSource, MAX_FRAME_BYTES } from "./stream.js";
+import { nodeStreamTransport, nodeTransport } from "./transport.js";
+import type { StreamTransport, Transport } from "./transport.js";
 
 export const CHAT_TIMEOUT_MS = 300_000;
 export const DISCOVERY_TIMEOUT_MS = 3_000;
@@ -20,6 +23,10 @@ export interface OllamaProviderOptions {
   readonly discoveryTimeoutMs?: number;
   /** Test seam; default: Node's built-in HTTP client with direct connections. */
   readonly transport?: Transport;
+  /** Test seam for streaming replies; default: Node's built-in client, read incrementally. */
+  readonly streamTransport?: StreamTransport;
+  /** Longest accepted NDJSON frame in bytes. Default 16 MiB; tests inject a small value. */
+  readonly maxFrameBytes?: number;
 }
 
 interface Prepared {
@@ -30,9 +37,6 @@ interface Prepared {
 const NO_LOCAL_MODELS =
   "No local Ollama models are installed (cloud models are not used). Install one with: ollama pull <model>";
 
-function pullHint(model: string): string {
-  return `Install it yourself with: ollama pull ${model}`;
-}
 
 /**
  * Native Ollama provider (/api/tags, /api/show, /api/chat; non-streaming).
@@ -46,6 +50,7 @@ export class OllamaProvider implements Provider {
   private readonly chatTimeoutMs: number;
   private readonly discoveryTimeoutMs: number;
   private readonly transport: Transport;
+  private readonly streamTransport: StreamTransport;
   private tags: readonly TagEntry[] | undefined;
   private readonly shows = new Map<string, ShowInfo>();
 
@@ -53,31 +58,14 @@ export class OllamaProvider implements Provider {
     this.chatTimeoutMs = options.chatTimeoutMs ?? CHAT_TIMEOUT_MS;
     this.discoveryTimeoutMs = options.discoveryTimeoutMs ?? DISCOVERY_TIMEOUT_MS;
     this.transport = options.transport ?? nodeTransport;
+    this.streamTransport = options.streamTransport ?? nodeStreamTransport;
   }
 
   async generate(request: GenerationRequest, signal: AbortSignal): Promise<GenerationOutcome> {
     const snapshot = snapshotRequest(request); // before the first await
     ensureNotAborted(signal);
     const prepared = await this.prepare(snapshot.model, signal);
-    const think = thinkField(
-      snapshot.reasoning.effort,
-      snapshot.reasoning.explicit,
-      prepared.capabilities.reasoning,
-      snapshot.model,
-    );
-    const messages = [
-      ...(snapshot.instructions === undefined || snapshot.instructions === ""
-        ? []
-        : [{ role: "system", content: snapshot.instructions }]),
-      ...snapshot.messages.map((message) => ({ role: message.role, content: message.content })),
-    ];
-    const payload = {
-      model: prepared.entry.id,
-      messages,
-      stream: false,
-      ...(think === undefined ? {} : { think }),
-      ...(snapshot.maxOutputTokens === undefined ? {} : { options: { num_predict: snapshot.maxOutputTokens } }),
-    };
+    const payload = chatPayload(snapshot, prepared, false);
     let data: unknown;
     try {
       data = await this.requestJson("POST", "/api/chat", payload, this.chatTimeoutMs, signal);
@@ -89,17 +77,32 @@ export class OllamaProvider implements Provider {
     return outcome;
   }
 
-  /** Streaming is a later task: lazily yields one failed event with no discovery or network. */
-  async *stream(_request: GenerationRequest, signal: AbortSignal): AsyncGenerator<StreamEvent> {
-    ensureNotAborted(signal);
-    await Promise.resolve();
-    ensureNotAborted(signal);
-    yield {
-      kind: "failed",
-      error: new ProviderError("Ollama streaming is not implemented yet.", "api"),
-      partialText: "",
-    };
-    ensureNotAborted(signal);
+  /**
+   * Incremental `/api/chat` (`stream: true`). The request is captured now;
+   * model discovery, checks and the network wait for the first `next()`. The
+   * chat timeout is an idle deadline (connecting, headers and each wait for
+   * body bytes), not a limit on the whole answer. A single consumer is assumed.
+   */
+  stream(request: GenerationRequest, signal: AbortSignal): AsyncIterable<StreamEvent> {
+    const snapshot = snapshotRequest(request);
+    return eventStream(
+      signal,
+      () =>
+        new OllamaSource({
+          begin: async (own) => {
+            const prepared = await this.prepare(snapshot.model, own);
+            return {
+              url: `${this.options.baseUrl}/api/chat`,
+              body: JSON.stringify(chatPayload(snapshot, prepared, true)),
+              model: prepared.entry.id,
+            };
+          },
+          transport: this.streamTransport,
+          idleMs: this.chatTimeoutMs,
+          signal,
+          maxFrameBytes: this.options.maxFrameBytes ?? MAX_FRAME_BYTES,
+        }),
+    );
   }
 
   /** Installed local chat models in Ollama's order. */
@@ -254,15 +257,22 @@ export class OllamaProvider implements Provider {
   }
 }
 
-/** A non-2xx reply; always a ProviderError so callers need no special case. */
-class HttpStatusError extends ProviderError {
-  constructor(
-    readonly status: number,
-    readonly detail: string,
-  ) {
-    super(`Ollama API error (HTTP ${String(status)}): ${detail}`, "api");
-    this.name = "ProviderError";
-  }
+/** The `/api/chat` body, identical for both modes apart from `stream`. */
+function chatPayload(snapshot: GenerationRequest, prepared: Prepared, stream: boolean): Record<string, unknown> {
+  const think = thinkField(snapshot.reasoning.effort, snapshot.reasoning.explicit, prepared.capabilities.reasoning, snapshot.model);
+  const messages = [
+    ...(snapshot.instructions === undefined || snapshot.instructions === ""
+      ? []
+      : [{ role: "system", content: snapshot.instructions }]),
+    ...snapshot.messages.map((message) => ({ role: message.role, content: message.content })),
+  ];
+  return {
+    model: prepared.entry.id,
+    messages,
+    stream,
+    ...(think === undefined ? {} : { think }),
+    ...(snapshot.maxOutputTokens === undefined ? {} : { options: { num_predict: snapshot.maxOutputTokens } }),
+  };
 }
 
 function findEntry(tags: readonly TagEntry[], id: string): ModelInfo | undefined {
@@ -281,25 +291,4 @@ function cloudError(shownModel: string): ProviderError {
     `'${shownModel}' is an Ollama cloud model that runs on a remote service. Choose a local model.`,
     "api",
   );
-}
-
-/** Ollama's `{"error": "..."}` text, else the start of the body; always safe to print. */
-function errorDetail(body: string): string {
-  try {
-    const parsed: unknown = JSON.parse(body);
-    if (typeof parsed === "object" && parsed !== null && "error" in parsed && typeof parsed.error === "string") {
-      return safeText(parsed.error) || "no details";
-    }
-  } catch {
-    // not JSON: fall through to the raw text
-  }
-  return safeText(body) || "no details";
-}
-
-function explainNotFound(error: unknown, model: string): unknown {
-  if (error instanceof HttpStatusError && error.status === 404) {
-    const shown = safeText(model);
-    return new ProviderError(`Ollama model '${shown}' was not found: ${error.detail}. ${pullHint(shown)}`, "api");
-  }
-  return error;
 }

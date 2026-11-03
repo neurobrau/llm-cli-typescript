@@ -39,7 +39,7 @@ export function buildParams(request: GenerationRequest, effort: string | undefin
 
 type Record_ = Readonly<Record<string, unknown>>;
 
-function isRecord(value: unknown): value is Record_ {
+export function isRecord(value: unknown): value is Record_ {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
@@ -88,7 +88,7 @@ export function convertResponse(raw: unknown, secrets: readonly string[]): Gener
  * Joins `output_text` parts of message items in order. Refusals are collected
  * separately; reasoning, tool and other items are never answer text.
  */
-function outputText(output: readonly unknown[]): { text: string; refusal: string } {
+export function outputText(output: readonly unknown[]): { text: string; refusal: string } {
   let text = "";
   let refusal = "";
   for (const item of output) {
@@ -113,7 +113,7 @@ function outputText(output: readonly unknown[]): { text: string; refusal: string
   return { text, refusal };
 }
 
-function incompleteReason(reason: string, secrets: readonly string[]): string {
+export function incompleteReason(reason: string, secrets: readonly string[]): string {
   switch (reason) {
     case "max_output_tokens":
       return "the max output token limit was reached";

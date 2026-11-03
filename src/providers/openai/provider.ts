@@ -3,10 +3,13 @@ import { snapshotRequest } from "../../domain/generation.js";
 import type { GenerationOutcome, GenerationRequest, ProviderId, StreamEvent } from "../../domain/generation.js";
 import type { Availability, ModelInfo, Provider } from "../../domain/provider.js";
 import type { ModelCapabilities } from "../../domain/settings.js";
+import { eventStream, failedSource } from "../event-stream.js";
+import type { EventSource } from "../event-stream.js";
 import { DEFAULT_MODEL, capabilitiesFor, isTextModel } from "./capabilities.js";
 import { buildParams, convertResponse } from "./convert.js";
 import { apiError, missingApiKeyError, providerErrorFor, rejectsReasoning } from "./errors.js";
 import type { SdkFailure } from "./errors.js";
+import { OpenAiSource } from "./stream.js";
 import { createOpenAiApi, describeSdkError } from "./sdk.js";
 import type { OpenAiApi, RequestControl } from "./sdk.js";
 
@@ -60,7 +63,7 @@ function startDeadline(signal: AbortSignal, timeoutMs: number): Deadline {
   };
 }
 
-/** OpenAI Responses API provider (non-streaming). */
+/** OpenAI Responses API provider. */
 export class OpenAIProvider implements Provider {
   readonly id: ProviderId = "openai";
   readonly label = "OpenAI";
@@ -107,19 +110,40 @@ export class OpenAIProvider implements Provider {
   }
 
   /**
-   * Streaming is not implemented in this task. Lazily yields one normalized
-   * failed event, with no key access or network; cancellation throws AbortError.
+   * Incremental Responses stream. The request is captured now; the key lookup
+   * and all network I/O wait for the first `next()`. The generation timeout is
+   * applied as an idle deadline (connecting, headers and each wait for the
+   * next SDK event), not as a limit on the whole answer. A single consumer is
+   * assumed.
    */
-  async *stream(_request: GenerationRequest, signal: AbortSignal): AsyncGenerator<StreamEvent> {
-    ensureNotAborted(signal);
-    await Promise.resolve();
-    ensureNotAborted(signal);
-    yield {
-      kind: "failed",
-      error: apiError("OpenAI streaming is not implemented yet."),
-      partialText: "",
-    };
-    ensureNotAborted(signal);
+  stream(request: GenerationRequest, signal: AbortSignal): AsyncIterable<StreamEvent> {
+    const snapshot = snapshotRequest(request);
+    return eventStream(signal, () => this.streamSource(snapshot, signal));
+  }
+
+  private streamSource(snapshot: GenerationRequest, signal: AbortSignal): EventSource {
+    let connection;
+    try {
+      connection = this.connection();
+    } catch (error: unknown) {
+      if (error instanceof ProviderError) {
+        return failedSource(error);
+      }
+      throw error;
+    }
+    const choice = snapshot.reasoning;
+    const rejected = this.rejectedReasoning.has(snapshot.model);
+    return new OpenAiSource({
+      api: connection.api,
+      key: connection.key,
+      request: snapshot,
+      effort: choice.effort !== undefined && !choice.explicit && rejected ? undefined : choice.effort,
+      idleMs: this.generationTimeoutMs,
+      signal,
+      onReasoningRejected: () => {
+        this.rejectedReasoning.add(snapshot.model);
+      },
+    });
   }
 
   async listModels(signal: AbortSignal): Promise<readonly ModelInfo[]> {

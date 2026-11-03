@@ -4,10 +4,11 @@ import { resolveSettings } from "./application/resolve-settings.js";
 import type { HistoryPort, SettingsPort } from "./application/chat-startup.js";
 import { runChat } from "./chat/run-chat.js";
 import { EXIT_CANCELLED, ProviderError, SettingsError, exitCodeForKind, isAbortError } from "./domain/errors.js";
-import type { ProviderId } from "./domain/generation.js";
+import type { GenerationRequest, ProviderId } from "./domain/generation.js";
 import type { Provider } from "./domain/provider.js";
 import { styleInstructions } from "./domain/settings.js";
-import { EDITION_TITLE, formatUsage, helpText, usageHint, versionText } from "./help.js";
+import { consumeStream } from "./application/stream-consumer.js";
+import { EDITION_TITLE, formatDuration, formatUsage, helpText, usageHint, versionText } from "./help.js";
 import { OpenAIProvider } from "./providers/openai/provider.js";
 import { EXIT_BROKEN_PIPE, EXIT_FAILURE, EXIT_INCOMPLETE, EXIT_OK, EXIT_USAGE, OutputError, hasErrorCode, write } from "./io.js";
 import type { InterruptSource, Io } from "./io.js";
@@ -109,9 +110,17 @@ async function runPrompt(invocation: PromptInvocation, io: Io, deps: RunDependen
   });
   try {
     const provider = (deps.createProvider ?? defaultProvider)(invocation.provider);
+    const cleanupMs = deps.cleanupTimeoutMs ?? DEFAULT_CLEANUP_TIMEOUT_MS;
+    if (invocation.stream) {
+      const prepared = await settleBounded(prepareRequest(invocation, provider, controller.signal), controller.signal, cleanupMs);
+      if (prepared === "interrupted" || controller.signal.aborted) {
+        return await interrupted(io);
+      }
+      return await streamPrompt(prepared, invocation, provider, io, controller.signal, cleanupMs);
+    }
     const operation = oneShot(invocation, provider, controller.signal);
     // After an interrupt, wait only a bounded time for the operation to settle.
-    const outcome = await settleBounded(operation, controller.signal, deps.cleanupTimeoutMs ?? DEFAULT_CLEANUP_TIMEOUT_MS);
+    const outcome = await settleBounded(operation, controller.signal, cleanupMs);
     if (outcome === "interrupted") {
       return await interrupted(io);
     }
@@ -149,7 +158,13 @@ async function interrupted(io: Io): Promise<number> {
 
 type OneShotResult = Awaited<ReturnType<typeof oneShot>>;
 
-async function oneShot(invocation: PromptInvocation, provider: Provider, signal: AbortSignal) {
+interface PreparedRequest {
+  readonly request: GenerationRequest;
+  readonly notices: readonly string[];
+}
+
+/** Resolves model, capabilities and settings into the request; shared by streaming and non-streaming. */
+async function prepareRequest(invocation: PromptInvocation, provider: Provider, signal: AbortSignal): Promise<PreparedRequest> {
   const model = invocation.model ?? (await provider.defaultModel(signal));
   const capabilities = await provider.getCapabilities(model, signal);
   // One-shot uses flags and built-in defaults only: no saved preferences are read.
@@ -166,25 +181,85 @@ async function oneShot(invocation: PromptInvocation, provider: Provider, signal:
     mode: "strict",
   });
   const instructions = styleInstructions(settings.answerStyle.value);
-  const outcome = await provider.generate(
-    {
-      model,
-      messages: [{ role: "user", content: invocation.prompt }],
-      reasoning: settings.reasoning,
-      ...(settings.maxOutputTokens.value === undefined ? {} : { maxOutputTokens: settings.maxOutputTokens.value }),
-      ...(instructions === undefined ? {} : { instructions }),
-    },
-    signal,
-  );
+  const request: GenerationRequest = {
+    model,
+    messages: [{ role: "user", content: invocation.prompt }],
+    reasoning: settings.reasoning,
+    ...(settings.maxOutputTokens.value === undefined ? {} : { maxOutputTokens: settings.maxOutputTokens.value }),
+    ...(instructions === undefined ? {} : { instructions }),
+  };
+  return { request, notices };
+}
+
+async function oneShot(invocation: PromptInvocation, provider: Provider, signal: AbortSignal) {
+  const { request, notices } = await prepareRequest(invocation, provider, signal);
+  const outcome = await provider.generate(request, signal);
   return { outcome, notices };
 }
 
-/** Resolves with the operation's result, or "interrupted" if it did not settle in time after an abort. */
-async function settleBounded(
-  operation: Promise<OneShotResult>,
+/**
+ * Streams the answer to stdout. Every text delta is written (and flushed by
+ * the writer) before the next event is pulled; a final newline follows the
+ * answer, before anything goes to stderr. Reasoning is never printed.
+ */
+async function streamPrompt(
+  prepared: PreparedRequest,
+  invocation: PromptInvocation,
+  provider: Provider,
+  io: Io,
   signal: AbortSignal,
-  timeoutMs: number,
-): Promise<OneShotResult | "interrupted"> {
+  cleanupMs: number,
+): Promise<number> {
+  for (const note of prepared.notices) {
+    await write(io.stderr, `${PROGRAM_NAME}: note: ${note}\n`);
+  }
+  const output = { printed: false };
+  const { end } = await consumeStream(
+    (own) => provider.stream(prepared.request, own),
+    signal,
+    async (text) => {
+      await write(io.stdout, text);
+      output.printed = true;
+    },
+    cleanupMs,
+  );
+  if (end.kind === "output-error") {
+    throw end.error; // the original OutputError; no further stdout writes
+  }
+  if (end.kind !== "terminal" || signal.aborted) {
+    if (output.printed) {
+      await write(io.stdout, "\n"); // end the partial line before stderr
+    }
+    return interrupted(io);
+  }
+  const { event } = end;
+  if (event.kind === "completed") {
+    await write(io.stdout, "\n");
+    if (invocation.usage) {
+      await write(io.stderr, `${formatUsage(event.result.usage)}\n`);
+      const duration = formatDuration(event.metadata?.timing);
+      if (duration !== "") {
+        await write(io.stderr, `${duration}\n`);
+      }
+    }
+    return EXIT_OK;
+  }
+  if (output.printed) {
+    await write(io.stdout, "\n");
+  }
+  if (event.kind === "incomplete") {
+    await write(io.stderr, `${PROGRAM_NAME}: warning: response incomplete: ${event.reason}.\n`);
+    if (invocation.usage && event.usage !== undefined) {
+      await write(io.stderr, `${formatUsage(event.usage)}\n`);
+    }
+    return EXIT_INCOMPLETE;
+  }
+  await write(io.stderr, `${PROGRAM_NAME}: error: ${event.error.message}\n`);
+  return exitCodeForKind(event.error.kind);
+}
+
+/** Resolves with the operation's result, or "interrupted" if it did not settle in time after an abort. */
+async function settleBounded<T>(operation: Promise<T>, signal: AbortSignal, timeoutMs: number): Promise<T | "interrupted"> {
   let timer: NodeJS.Timeout | undefined;
   let onAbort: (() => void) | undefined;
   const gaveUp = new Promise<"interrupted">((resolve) => {

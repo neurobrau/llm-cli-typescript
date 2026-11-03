@@ -190,7 +190,7 @@ void describe("provider creation", () => {
         return new FakeProvider();
       },
     };
-    for (const argv of [["--help"], ["--version"], ["--bogus"], ["--stream", "p"], ["--plain", "p"], ["--provider", "other", "p"], [""], ["a", "b"], ["--max-output-tokens", "0", "p"]]) {
+    for (const argv of [["--help"], ["--version"], ["--bogus"], ["--stream=x", "p"], ["--stream", "--plain", "p"], ["--provider", "other", "p"], [""], ["a", "b"], ["--max-output-tokens", "0", "p"]]) {
       await run(argv, capture().io, deps);
     }
     assert.equal(created, 0);

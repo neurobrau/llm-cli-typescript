@@ -1,5 +1,4 @@
 import assert from "node:assert/strict";
-import { spawn } from "node:child_process";
 import { mkdir, mkdtemp, readFile, readdir, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
@@ -10,6 +9,8 @@ import { deferred } from "./helpers/deferred.js";
 import { Loopback, completedBody, json } from "./helpers/loopback.js";
 import { KEY, bodyOf as openaiBody } from "./helpers/openai.js";
 import { bodyOf as ollamaBody, chat as ollamaChat, paths, tag, tags } from "./helpers/ollama.js";
+import { live as startLive } from "./helpers/live.js";
+import type { LiveChild } from "./helpers/live.js";
 import { startNode } from "./helpers/spawn.js";
 
 const ROOT = resolve(import.meta.dirname, "..", "..");
@@ -165,43 +166,7 @@ void describe("plain chat: missing credentials through dist/cli.js", () => {
   });
 });
 
-interface LiveChild {
-  readonly child: ReturnType<typeof spawn>;
-  readonly result: Promise<{ code: number | null; signal: NodeJS.Signals | null }>;
-  stdout(): string;
-  stderr(): string;
-  waitFor(stream: "stdout" | "stderr", pattern: RegExp): Promise<void>;
-  write(text: string): void;
-}
-
-function live(args: readonly string[]): LiveChild {
-  const child = spawn(process.execPath, [...args], { env, stdio: ["pipe", "pipe", "pipe"], timeout: 20_000, killSignal: "SIGKILL" });
-  const buffers = { stdout: "", stderr: "" };
-  const waiters: { stream: "stdout" | "stderr"; pattern: RegExp; resolve: () => void }[] = [];
-  const check = (): void => {
-    for (const waiter of [...waiters]) {
-      if (waiter.pattern.test(buffers[waiter.stream])) {
-        waiters.splice(waiters.indexOf(waiter), 1);
-        waiter.resolve();
-      }
-    }
-  };
-  child.stdout.setEncoding("utf8").on("data", (chunk: string) => { buffers.stdout += chunk; check(); });
-  child.stderr.setEncoding("utf8").on("data", (chunk: string) => { buffers.stderr += chunk; check(); });
-  child.stdin.on("error", () => undefined);
-  const result = new Promise<{ code: number | null; signal: NodeJS.Signals | null }>((resolvePromise, reject) => {
-    child.once("error", reject);
-    child.once("close", (code, signal) => { resolvePromise({ code, signal }); });
-  });
-  return {
-    child,
-    result,
-    stdout: () => buffers.stdout,
-    stderr: () => buffers.stderr,
-    waitFor: (stream, pattern) => new Promise<void>((resolvePromise) => { waiters.push({ stream, pattern, resolve: resolvePromise }); check(); }),
-    write: (text) => { child.stdin.write(text); },
-  };
-}
+const live = (args: readonly string[]): LiveChild => startLive(args, env);
 
 void describe("plain chat: real SIGINT in a child process", () => {
   void it("cancels the in-flight request, prints the notice, stays alive, and a later /exit gives 0 with nothing saved", async () => {

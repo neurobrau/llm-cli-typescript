@@ -14,9 +14,9 @@ export function invalidResponse(reason: string): ProviderError {
   return new ProviderError(`Invalid response from Ollama: ${reason}.`, "api");
 }
 
-type JsonObject = Readonly<Record<string, unknown>>;
+export type JsonObject = Readonly<Record<string, unknown>>;
 
-function asObject(value: unknown): JsonObject | undefined {
+export function asObject(value: unknown): JsonObject | undefined {
   return typeof value === "object" && value !== null && !Array.isArray(value)
     ? Object.fromEntries(Object.entries(value))
     : undefined;
@@ -130,7 +130,7 @@ export function parseShow(data: unknown): ShowInfo {
 // ----- /api/chat -----
 
 /** A count only when it is an exact non-negative safe integer; never rounded. */
-function toCount(value: unknown): bigint | undefined {
+export function toCount(value: unknown): bigint | undefined {
   return typeof value === "number" && Number.isSafeInteger(value) && value >= 0 ? BigInt(value) : undefined;
 }
 
@@ -138,7 +138,7 @@ function toCount(value: unknown): bigint | undefined {
  * prompt_eval_count/eval_count as input/output tokens. The total is the exact
  * sum only when both were reported (derived, not an estimate).
  */
-function parseUsage(reply: JsonObject): TokenUsage | undefined {
+export function parseUsage(reply: JsonObject): TokenUsage | undefined {
   const inputTokens = toCount(reply.prompt_eval_count);
   const outputTokens = toCount(reply.eval_count);
   if (inputTokens === undefined && outputTokens === undefined) {

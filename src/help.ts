@@ -1,5 +1,5 @@
 import { PROGRAM_NAME } from "./args.js";
-import type { TokenUsage } from "./domain/generation.js";
+import type { StreamTiming, TokenUsage } from "./domain/generation.js";
 
 const EDITION = "NeuroBräu TypeScript CLI";
 
@@ -17,17 +17,19 @@ export function usageHint(): string {
 export function helpText(version: string): string {
   return `usage: ${PROGRAM_NAME} [-h] [--version] [--provider PROVIDER] [--model MODEL_ID]
                  [--reasoning-effort EFFORT] [--max-output-tokens N]
-                 [--answer-style STYLE] [--usage] [--plain] [--no-history]
+                 [--answer-style STYLE] [--usage] [--stream] [--plain]
+                 [--no-history]
                  [prompt]
 
 ${EDITION} ${version}
 
-With a prompt, sends it once to OpenAI or a local Ollama server
-(non-streaming) and prints the answer; no history or saved settings are used.
+With a prompt, sends it once to OpenAI or a local Ollama server and prints
+the answer; no history or saved settings are used.
 Without a prompt, starts a line-oriented chat (YOU > / AI >) that continues
 the last saved conversation, saves each completed exchange and applies saved
-settings. Streaming, cost estimates, provider/model switching and the
-fullscreen interface are future work. OpenAI requires OPENAI_API_KEY in the
+settings. With --stream the answer is printed as it arrives (one-shot and
+chat). Cost estimates, provider/model switching and the fullscreen interface
+are future work. OpenAI requires OPENAI_API_KEY in the
 environment. Ollama needs no key; OLLAMA_HOST selects the server (default
 http://127.0.0.1:11434).
 
@@ -51,6 +53,8 @@ options:
   --answer-style STYLE       brief, normal or detailed (default: the saved
                              choice (chat only), else normal)
   --usage                    print reported token usage to stderr
+  --stream                   print the answer as it arrives; Ctrl+C cancels
+                             and nothing of a partial answer is saved
   --plain                    line-oriented chat (the only chat mode for now);
                              not allowed with a prompt
   --no-history               chat without reading or saving conversations;
@@ -73,4 +77,25 @@ export function formatUsage(usage: TokenUsage | undefined): string {
   ];
   const parts = fields.flatMap(([name, count]) => (count === undefined ? [] : [`${name}=${count.toString()}`]));
   return `Token usage: ${parts.length > 0 ? parts.join(", ") : "not reported"}`;
+}
+
+/**
+ * The `Duration:` line for provider-reported timing (Ollama), or "" when the
+ * total was not reported. Missing values are never shown as zero.
+ */
+export function formatDuration(timing: StreamTiming | undefined): string {
+  const total = timing?.totalSeconds;
+  if (total === undefined || total <= 0) {
+    return "";
+  }
+  const details: string[] = [];
+  const load = timing?.loadSeconds;
+  const generation = timing?.evalSeconds;
+  if (load !== undefined && load > 0) {
+    details.push(`load ${load.toFixed(2)} s`);
+  }
+  if (generation !== undefined && generation > 0) {
+    details.push(`generation ${generation.toFixed(2)} s`);
+  }
+  return `Duration: ${total.toFixed(2)} s${details.length > 0 ? ` (${details.join(", ")})` : ""}`;
 }

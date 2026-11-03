@@ -46,6 +46,7 @@ export async function runChat(invocation: ChatInvocation, io: Io, deps: ChatRunD
       io,
       input,
       showUsage: invocation.usage,
+      stream: invocation.stream,
       cleanupTimeoutMs: deps.cleanupTimeoutMs,
     });
     return await chat.run();

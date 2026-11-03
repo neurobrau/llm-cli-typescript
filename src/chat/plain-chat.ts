@@ -16,14 +16,15 @@
 import { PROGRAM_NAME } from "../args.js";
 import { describeStorageFailure } from "../application/session.js";
 import type { ChatSession } from "../application/session.js";
+import { consumeStream } from "../application/stream-consumer.js";
 import { usageReport } from "../application/usage-report.js";
 import { EXIT_CANCELLED, ProviderError, isAbortError } from "../domain/errors.js";
 import { snapshotRequest } from "../domain/generation.js";
-import type { GenerationOutcome, TokenUsage } from "../domain/generation.js";
+import type { GenerationOutcome, StreamTiming, TokenUsage } from "../domain/generation.js";
 import type { Provider } from "../domain/provider.js";
 import type { ResolvedSettings } from "../domain/settings.js";
 import { styleInstructions } from "../domain/settings.js";
-import { formatUsage } from "../help.js";
+import { formatDuration, formatUsage } from "../help.js";
 import { EXIT_OK, write } from "../io.js";
 import type { Io } from "../io.js";
 import type { LineInput } from "../line-input.js";
@@ -34,6 +35,7 @@ import {
   NOTICE_GOODBYE,
   NOTICE_HISTORY_DISABLED,
   NOTICE_NO_SAVED,
+  NOTICE_PARTIAL_UNSAVED,
   NOTICE_REQUEST_CANCELLED,
   NOTICE_RESET_MEMORY,
   NOTICE_RESET_SAVED,
@@ -57,6 +59,8 @@ export interface PlainChatOptions {
   readonly io: Io;
   readonly input: LineInput;
   readonly showUsage: boolean;
+  /** `--stream`: print the answer as it arrives. */
+  readonly stream?: boolean;
   /** Longest wait for a cancelled request to settle before the chat ends. */
   readonly cleanupTimeoutMs: number;
 }
@@ -214,6 +218,9 @@ export class PlainChat {
   // ----- messages -----
 
   private async send(text: string): Promise<number | undefined> {
+    if (this.options.stream === true) {
+      return this.sendStreamed(text);
+    }
     const { session, provider, settings, io } = this.options;
     const controller = new AbortController();
     const instructions = styleInstructions(settings.answerStyle.value);
@@ -272,6 +279,80 @@ export class PlainChat {
   }
 
   /**
+   * The streaming counterpart of `send`: the same request, the same
+   * accepted-or-cancelled decision and commit rules, but the answer is printed
+   * while it arrives. Only a completed terminal event commits anything.
+   */
+  private async sendStreamed(text: string): Promise<number | undefined> {
+    const { session, provider, settings, io } = this.options;
+    const controller = new AbortController();
+    const instructions = styleInstructions(settings.answerStyle.value);
+    const request = snapshotRequest({
+      model: settings.model,
+      messages: session.messagesFor(text),
+      reasoning: settings.reasoning,
+      ...(settings.maxOutputTokens.value === undefined ? {} : { maxOutputTokens: settings.maxOutputTokens.value }),
+      ...(instructions === undefined ? {} : { instructions }),
+    });
+    this.generation = controller;
+    this.phase = "generating";
+    const shown = { printed: false };
+    let consumed;
+    try {
+      consumed = await consumeStream(
+        (own) => provider.stream(request, own),
+        controller.signal,
+        async (delta) => {
+          await write(io.stdout, shown.printed ? delta : `${AI_PREFIX}${delta}`);
+          shown.printed = true;
+        },
+        this.options.cleanupTimeoutMs,
+      );
+    } finally {
+      this.generation = undefined;
+    }
+    const { end } = consumed;
+    // From here to the commit there is no await: cancellation either already won or cannot any more.
+    if (end.kind === "output-error") {
+      this.phase = "busy";
+      throw end.error; // nothing is committed; the chat ends with the output failure
+    }
+    if (end.kind === "stuck") {
+      if (shown.printed) await this.out("\n");
+      await write(io.stderr, `${PROGRAM_NAME}: interrupted\n`);
+      return EXIT_CANCELLED;
+    }
+    if (end.kind === "cancelled" || controller.signal.aborted) {
+      this.phase = "busy";
+      if (shown.printed) await this.out("\n");
+      await this.err(`\n${NOTICE_REQUEST_CANCELLED}${shown.printed ? NOTICE_PARTIAL_UNSAVED : ""}\n`);
+      return undefined;
+    }
+    const { event } = end;
+    this.phase = "busy";
+    if (event.kind === "completed") {
+      session.applyCompleted(text, event.result);
+      const warnings = await session.persist();
+      await this.out(shown.printed ? "\n" : `${AI_PREFIX}\n`);
+      await this.reportUsage(event.result.usage, event.metadata?.timing);
+      for (const warning of warnings) await this.warn(warning);
+      return undefined;
+    }
+    if (shown.printed) await this.out("\n");
+    const suffix = shown.printed ? NOTICE_PARTIAL_UNSAVED : "";
+    if (event.kind === "incomplete") {
+      const persist = session.applyIncomplete(event);
+      const warnings = persist ? await session.persist() : [];
+      await this.warn(`Response incomplete: ${event.reason}.${suffix}`);
+      await this.reportUsage(event.usage);
+      for (const warning of warnings) await this.warn(warning);
+      return undefined;
+    }
+    await this.err(`error: ${event.error.message}${suffix}\n`);
+    return undefined;
+  }
+
+  /**
    * Waits for the request. After an abort it waits at most the cleanup bound;
    * a provider that ignores the abort ends the chat. The returned promise
    * never rejects, so a late settlement can never surface as an unhandled one.
@@ -312,8 +393,11 @@ export class PlainChat {
     throw error;
   }
 
-  private async reportUsage(usage: TokenUsage | undefined): Promise<void> {
-    if (this.options.showUsage) await this.err(`${formatUsage(usage)}\n`);
+  private async reportUsage(usage: TokenUsage | undefined, timing?: StreamTiming): Promise<void> {
+    if (!this.options.showUsage) return;
+    await this.err(`${formatUsage(usage)}\n`);
+    const duration = formatDuration(timing);
+    if (duration !== "") await this.err(`${duration}\n`);
   }
 
   private async storageError(error: unknown): Promise<undefined> {

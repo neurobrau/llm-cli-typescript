@@ -169,7 +169,7 @@ async function main() {
 
 // ----- chat sessions -----
 
-function fakeProvider(id, answers) {
+function fakeProvider(id, answers, streams = []) {
   const seen = [];
   return {
     id,
@@ -179,8 +179,24 @@ function fakeProvider(id, answers) {
       seen.push(request.messages.map((message) => `${message.role}:${message.content}`));
       return answers[seen.length - 1] ?? { kind: "completed", result: { text: `answer ${String(seen.length)}` } };
     },
-    stream() {
-      throw new Error("streaming is not part of this check");
+    // Streamed turns: each script is the list of events of one request.
+    stream(request) {
+      seen.push(request.messages.map((message) => `${message.role}:${message.content}`));
+      const events = streams[seen.length - 1] ?? [];
+      return {
+        [Symbol.asyncIterator]() {
+          let index = 0;
+          return {
+            async next() {
+              const event = events[index++];
+              return event === undefined ? { done: true, value: undefined } : { done: false, value: event };
+            },
+            async return() {
+              return { done: true, value: undefined };
+            },
+          };
+        },
+      };
     },
     async listModels() {
       return [];
@@ -235,6 +251,27 @@ async function sessionChecks(codecs, pythonConversation) {
   const code = await runSession(main, fresh, ["--provider", "ollama", "--model", "hf.co/org/model:Q4_K_M"], ['q1 "x" \u{1F600}', "q2", "/reset", "/exit"], provider);
   if (code !== 0) failures.push(`TS session exited ${String(code)}`);
   collect(fresh, "fresh");
+
+  // A streamed session: deltas assembled into the exact text, exact huge counts, an incomplete record with usage.
+  const streamed = join(scratch, "session-streamed");
+  const text = 'stream \u0001 "q" \\ \u{1F600} é';
+  const streamProvider = fakeProvider("ollama", [], [
+    [
+      { kind: "reasoning", text: "never saved" },
+      ...Array.from(text).map((piece) => ({ kind: "text", text: piece })),
+      { kind: "completed", result: { text, usage: { inputTokens: big, outputTokens: 0n, totalTokens: big }, serviceTier: "" } },
+    ],
+    [
+      { kind: "text", text: "part" },
+      { kind: "incomplete", reason: "limit", partialText: "part", usage: { outputTokens: 9007199254740993n } },
+    ],
+  ]);
+  const codeStreamed = await runSession(main, streamed, ["--stream", "--provider", "ollama", "--model", "hf.co/org/model:Q4_K_M"], ["s1", "s2", "/exit"], streamProvider);
+  if (codeStreamed !== 0) failures.push(`TS streamed session exited ${String(codeStreamed)}`);
+  collect(streamed, "streamed");
+  for (const [name, bytes] of files) {
+    if (name.includes("_streamed_") && bytes.includes("never saved")) failures.push(`${name}: reasoning text reached the saved file`);
+  }
 
   // A Python-written conversation continued by TS: context sent, prior records kept exactly.
   const continued = join(scratch, "session-continued");

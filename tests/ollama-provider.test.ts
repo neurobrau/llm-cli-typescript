@@ -805,16 +805,10 @@ void describe("cancellation", () => {
     assert.ok(!(outcome instanceof ProviderError));
   });
 
-  void it("stream is a lazy single failed event that touches no network", async () => {
+  void it("stream is lazy: creating it sends nothing until the first pull", async () => {
     const provider = providerFor(server);
-    const stream = provider.stream(request(), signal());
-    assert.equal(server.requests.length, 0);
-    const events = [];
-    for await (const event of stream) {
-      events.push(event);
-    }
-    assert.equal(events.length, 1);
-    assert.equal(events[0]?.kind, "failed");
+    void provider.stream(request(), signal());
+    await new Promise((resolve) => setImmediate(resolve));
     assert.equal(server.requests.length, 0);
   });
 });

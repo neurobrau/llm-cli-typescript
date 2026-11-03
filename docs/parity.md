@@ -2,7 +2,7 @@
 
 ## Current scope and limitations
 
-`0.2.0-dev` (the completed `0.1.0` CLI Foundation behavior is unchanged) implements `-h`/`--help`, `--version`, a non-streaming one-shot prompt for OpenAI and Ollama (`--provider openai|ollama`), and the non-streaming plain chat (`--plain`, `--no-history`) with persistent history and read-only saved settings. Not implemented: streaming (`--stream` is rejected), pricing and cost estimates, provider/model switching, model-discovery commands, terminal UI, `--transcript-on-exit`. Exit codes 1-8, 130 and 141 are produced for the one-shot path.
+`0.2.0-dev` (the completed `0.1.0` CLI Foundation behavior is unchanged) implements `-h`/`--help`, `--version`, a one-shot prompt for OpenAI and Ollama (`--provider openai|ollama`), the plain chat (`--plain`, `--no-history`) with persistent history and read-only saved settings, and `--stream` for both (Task 007). Not implemented: pricing and cost estimates, provider/model switching, model-discovery commands, terminal UI, `--transcript-on-exit`. Exit codes 1-8, 130 and 141 are produced for the one-shot path.
 
 ## References
 
@@ -79,6 +79,22 @@ References: Python `session.py`, `chat.py`, `cli.py`, `usage.py`, `docs/tui-spec
 - Saving and printing order: the exchange is committed and saved first, then printed (as Go).
 - `/cleanup` with a partial failure keeps the in-memory session (Go) and prints the number already deleted.
 - Verified against Python: `npm run test:parity` loads TS-session-written files with the Python readers and checks the Python writer reproduces the bytes, and continues a Python-written conversation through a TS session. The Go serializers are not executed (deferred to the consolidated gate).
+
+## Streaming differences (Task 007)
+
+References: Python `docs/tui-spec.md` §12/§14/§15/§16 and the Python/Go streaming code; Go `internal/llm/stream.go`, `internal/openai/stream.go`, `internal/ollama/stream.go`, `internal/cli/stream.go`, `internal/chat/stream.go`, `internal/chat/usage.go` (`FormatDuration`).
+
+- **Cancellation** is an `AbortError` from the iterator (Go/Python deliver a `StreamFailed` wrapping the cancellation); the application layer decides from its own signal.
+- **No SDK retries**, including for the initial request (Go keeps SDK retries for the first request); the only retry is the narrow reasoning fallback, as in `generate`.
+- **Frame limit**: 16 MiB like Go, but enforced for complete lines and unfinished tails alike (Go checks only the unfinished tail after splitting a chunk). Frames before an oversized one are still processed.
+- **Strictness**: wrong types of `message`, `content`, `thinking` and `done` are API failures instead of being ignored; invalid UTF-8 is a failure (Go: `utf8.Valid` also fails). `error` records with a non-string value are a generic Ollama error.
+- **Unclosed `<think>`**: never an answer; a claimed-complete stream with an unclosed block is an API failure (the stricter accepted TS policy; Go flushes nothing and completes with empty text), `done_reason:"length"` stays incomplete.
+- **Idle deadline** granularity: OpenAI per SDK event, Ollama per received chunk (Go resets per read for Ollama and per event for OpenAI). Ollama default is the existing 300 s; OpenAI 60 s (Go: 600 s) because it reuses the accepted generation timeout.
+- **Fallback text**: when no delta arrived, a valid `response.completed` body's text is emitted once as a text event (Python/Go copy it into the terminal result only); a completed body without any text keeps the non-streaming failure.
+- **Reasoning events**: OpenAI maps `response.reasoning_text.delta` and `response.reasoning_summary_text.delta` (Go/Python ignore both); they are never printed or saved. No extra reasoning summaries are requested.
+- **One-shot**: stdout is flushed per delta by awaiting each write; the final newline precedes stderr output. The `Duration:` line follows Go's `FormatDuration` (total required; load and generation only when positive) and is printed only for completed answers with `--usage`. `--usage` after an incomplete answer prints usage when reported (as Go).
+- **Chat**: the save happens before the closing newline of an accepted answer (Go prints the newline, then commits). Incomplete answers record reported usage (§15) instead of leaving the file unchanged (older §14 wording); a first incomplete-only conversation stays unsaved until a completed turn (Task 006 policy).
+- **Bounded cancellation**: after Ctrl+C the chat waits at most the cleanup bound for the stream to settle and exits 130 if it does not; Python's worker threads and Go's goroutine drain have no equivalent bound.
 
 ## Proposed future decisions (not implemented, not yet accepted by the owner)
 

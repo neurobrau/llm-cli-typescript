@@ -14,6 +14,8 @@ export interface PromptInvocation {
   readonly maxOutputTokens?: number;
   readonly answerStyle?: AnswerStyle;
   readonly usage: boolean;
+  /** `--stream`: print the answer as it arrives. */
+  readonly stream: boolean;
   /** Exactly as given, whitespace preserved. */
   readonly prompt: string;
 }
@@ -31,6 +33,7 @@ export interface ChatInvocation {
   readonly maxOutputTokens?: number;
   readonly answerStyle?: AnswerStyle;
   readonly usage: boolean;
+  readonly stream: boolean;
   readonly noHistory: boolean;
 }
 
@@ -42,7 +45,7 @@ export type ParsedArgs =
   | { readonly kind: "error"; readonly message: string };
 
 /** Options of the Python/Go editions that this build deliberately rejects. */
-const FUTURE_OPTIONS: ReadonlySet<string> = new Set(["stream", "transcript-on-exit"]);
+const FUTURE_OPTIONS: ReadonlySet<string> = new Set(["transcript-on-exit"]);
 
 /** Switches that only make sense for the interactive chat. */
 const CHAT_SWITCHES: ReadonlySet<string> = new Set(["plain", "no-history"]);
@@ -54,6 +57,7 @@ const OPTIONS = {
   help: { type: "boolean", short: "h" },
   version: { type: "boolean" },
   usage: { type: "boolean" },
+  stream: { type: "boolean" },
   plain: { type: "boolean" },
   "no-history": { type: "boolean" },
   provider: { type: "string" },
@@ -69,7 +73,7 @@ function isValueOption(name: string): name is ValueOption {
 
 /**
  * Pure argument parser. It never throws for user input and performs no I/O.
- * Repeated identical --help/--version/--usage switches are idempotent; value
+ * Repeated identical --help/--version/--usage/--stream switches are idempotent; value
  * options may be given once. "--" ends option parsing.
  */
 export function parseCliArgs(argv: readonly string[]): ParsedArgs {
@@ -84,6 +88,7 @@ export function parseCliArgs(argv: readonly string[]): ParsedArgs {
   let help = false;
   let version = false;
   let usage = false;
+  let stream = false;
   const chatSwitches = new Set<string>();
   const values = new Map<ValueOption, string>();
   const valued: string[] = [];
@@ -97,7 +102,7 @@ export function parseCliArgs(argv: readonly string[]): ParsedArgs {
       positionals.push(token.value);
     } else if (token.kind === "option") {
       const { name, rawName } = token;
-      if (name === "help" || name === "version" || name === "usage" || CHAT_SWITCHES.has(name)) {
+      if (name === "help" || name === "version" || name === "usage" || name === "stream" || CHAT_SWITCHES.has(name)) {
         if (token.inlineValue === true) {
           valued.push(rawName);
         } else if (name === "help") {
@@ -106,6 +111,8 @@ export function parseCliArgs(argv: readonly string[]): ParsedArgs {
           version = true;
         } else if (name === "usage") {
           usage = true;
+        } else if (name === "stream") {
+          stream = true;
         } else {
           chatSwitches.add(name);
         }
@@ -135,7 +142,7 @@ export function parseCliArgs(argv: readonly string[]): ParsedArgs {
   if (firstProblem !== undefined) {
     return fail(`invalid argument: ${firstProblem}`);
   }
-  const hasGenerationOptions = usage || values.size > 0;
+  const hasGenerationOptions = usage || stream || values.size > 0;
   const hasOtherArguments =
     future.length > 0 || unknown.length > 0 || positionals.length > 0 || hasGenerationOptions || chatSwitches.size > 0;
   if ((help || version) && hasOtherArguments) {
@@ -180,6 +187,7 @@ export function parseCliArgs(argv: readonly string[]): ParsedArgs {
         ...(settings.maxOutputTokens === undefined ? {} : { maxOutputTokens: settings.maxOutputTokens }),
         ...(settings.answerStyle === undefined ? {} : { answerStyle: settings.answerStyle }),
         usage,
+        stream,
         noHistory: chatSwitches.has("no-history"),
       },
     };
@@ -191,10 +199,10 @@ export function parseCliArgs(argv: readonly string[]): ParsedArgs {
   if (firstChatSwitch !== undefined) {
     return fail(`option "--${firstChatSwitch}" cannot be used with a prompt: it applies to the interactive chat only`);
   }
-  return { kind: "prompt", invocation: { ...settings, usage, prompt } };
+  return { kind: "prompt", invocation: { ...settings, usage, stream, prompt } };
 }
 
-type ValidatedSettings = Omit<PromptInvocation, "usage" | "prompt">;
+type ValidatedSettings = Omit<PromptInvocation, "usage" | "stream" | "prompt">;
 
 /** Validates option values; returns a diagnostic string on failure. */
 function validateValues(values: ReadonlyMap<ValueOption, string>): ValidatedSettings | string {

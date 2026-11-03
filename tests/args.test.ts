@@ -22,8 +22,8 @@ function invocation(argv: readonly string[]): PromptInvocation {
 
 void describe("parseCliArgs: help and version", () => {
   void it("starts the chat, not help, without arguments and for bare --", () => {
-    assert.deepEqual(parseCliArgs([]), { kind: "chat", invocation: { usage: false, noHistory: false } });
-    assert.deepEqual(parseCliArgs(["--"]), { kind: "chat", invocation: { usage: false, noHistory: false } });
+    assert.deepEqual(parseCliArgs([]), { kind: "chat", invocation: { usage: false, stream: false, noHistory: false } });
+    assert.deepEqual(parseCliArgs(["--"]), { kind: "chat", invocation: { usage: false, stream: false, noHistory: false } });
   });
 
   void it("accepts --help, -h and --version", () => {
@@ -71,7 +71,7 @@ void describe("parseCliArgs: unsupported and unknown options", () => {
   });
 
   void it("rejects future options explicitly, before looking at values", () => {
-    for (const argv of [["--stream", "p"], ["--transcript-on-exit", "p"], ["--stream"], ["--transcript-on-exit"]]) {
+    for (const argv of [["--transcript-on-exit", "p"], ["--transcript-on-exit"]]) {
       assert.match(errorMessage(argv), /unsupported option/, JSON.stringify(argv));
     }
   });
@@ -83,7 +83,7 @@ void describe("parseCliArgs: unsupported and unknown options", () => {
 
 void describe("parseCliArgs: one-shot prompts", () => {
   void it("parses a prompt with defaults", () => {
-    assert.deepEqual(invocation(["hello"]), { provider: "openai", usage: false, prompt: "hello" });
+    assert.deepEqual(invocation(["hello"]), { provider: "openai", usage: false, stream: false, prompt: "hello" });
   });
 
   void it("parses every option, before or after the prompt", () => {
@@ -94,6 +94,7 @@ void describe("parseCliArgs: one-shot prompts", () => {
       maxOutputTokens: 600,
       answerStyle: "brief",
       usage: true,
+      stream: false,
       prompt: "What?",
     };
     assert.deepEqual(

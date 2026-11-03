@@ -67,6 +67,14 @@ export function isAbortError(error: unknown): boolean {
   return error instanceof Error && error.name === "AbortError";
 }
 
+/**
+ * Reads `signal.aborted` through a call: it changes across awaits, which
+ * control-flow analysis of the property cannot see.
+ */
+export function isAborted(signal: AbortSignal): boolean {
+  return signal.aborted;
+}
+
 /** Throws an AbortError if the signal is aborted, regardless of `signal.reason`. */
 export function ensureNotAborted(signal: AbortSignal): void {
   if (signal.aborted) {

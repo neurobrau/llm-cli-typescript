@@ -11,6 +11,8 @@ export const NOTICE_NO_SAVED = "No saved conversations.";
 export const NOTICE_CLEANUP_CANCELLED = "Cleanup cancelled. Nothing was deleted.";
 export const NOTICE_GOODBYE = "Goodbye.";
 export const NOTICE_REQUEST_CANCELLED = "Request cancelled.";
+/** Appended when part of an answer was shown but is not kept. */
+export const NOTICE_PARTIAL_UNSAVED = " The partial response was not saved.";
 
 /**
  * The command name (lower case, without the prefix) if `text` is a single

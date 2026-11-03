@@ -227,21 +227,10 @@ void describe("capabilities and default model", () => {
   });
 });
 
-void describe("stream (not implemented)", () => {
-  void it("is lazy: creating the iterator touches neither key nor network", async () => {
+void describe("stream (laziness and cancellation; see openai-stream.test.ts for the wire)", () => {
+  void it("is lazy: creating the stream touches neither key nor network", () => {
     const { provider, keyReads, apiCreations } = providerFor(server);
-    const iterator = provider.stream(baseRequest, signal());
-    assert.equal(keyReads() + apiCreations(), 0);
-    const events: StreamEvent[] = [];
-    for await (const event of iterator) {
-      events.push(event);
-    }
-    assert.equal(events.length, 1);
-    const [event] = events;
-    assert.ok(event?.kind === "failed");
-    assert.ok(event.error instanceof ProviderError && event.error.kind === "api");
-    assert.equal(event.error.message, "OpenAI streaming is not implemented yet.");
-    assert.equal(event.partialText, "");
+    void provider.stream(baseRequest, signal());
     assert.equal(keyReads() + apiCreations(), 0);
     assert.equal(server.requests.length, 0);
   });
@@ -251,7 +240,7 @@ void describe("stream (not implemented)", () => {
     controller.abort("reason");
     await assert.rejects(drain(providerFor(server).provider.stream(baseRequest, controller.signal)), isAbortError);
     const live = new AbortController();
-    const iterator = providerFor(server).provider.stream(baseRequest, live.signal);
+    const iterator = providerFor(server).provider.stream(baseRequest, live.signal)[Symbol.asyncIterator]();
     const pending = iterator.next();
     live.abort(new Error("x"));
     await assert.rejects(pending, isAbortError);

@@ -124,7 +124,8 @@ void describe("built CLI (dist/cli.js)", () => {
       { args: ["--help", "--version"], pattern: /conflicting options/ },
       { args: ["--version", "x"], pattern: /invalid invocation/ },
       { args: ["--version=foo"], pattern: /invalid argument/ },
-      { args: ["--stream"], pattern: /unsupported option "--stream"/ },
+      { args: ["--stream=1"], pattern: /does not take a value/ },
+      { args: ["--transcript-on-exit"], pattern: /unsupported option/ },
     ];
     for (const { args, pattern } of cases) {
       const result = await runCli(args);

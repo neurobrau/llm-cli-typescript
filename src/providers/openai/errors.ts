@@ -13,6 +13,11 @@ export type SdkFailure =
       /** Server-supplied message; untrusted, sanitized before display. */
       readonly detail?: string;
     }
+  | {
+      /** An `error` event inside a stream that had already started. */
+      readonly kind: "stream";
+      readonly detail?: string;
+    }
   | { readonly kind: "other" };
 
 export function missingApiKeyError(): ProviderError {
@@ -35,6 +40,10 @@ export function providerErrorFor(failure: SdkFailure, secrets: readonly string[]
       return new ProviderError("Could not connect to OpenAI. Check your network connection.", "connection");
     case "other":
       return apiError("Invalid response from OpenAI.");
+    case "stream": {
+      const detail = safeText(failure.detail ?? "", secrets);
+      return apiError(`OpenAI stream error: ${detail === "" ? "no details" : detail}`);
+    }
     case "status":
       return statusError(failure, secrets);
   }
