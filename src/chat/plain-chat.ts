@@ -16,7 +16,7 @@
 import { PROGRAM_NAME } from "../args.js";
 import { describeStorageFailure } from "../application/session.js";
 import type { ChatSession } from "../application/session.js";
-import { consumeStream } from "../application/stream-consumer.js";
+import { STREAM_UNCLOSED, consumeStream } from "../application/stream-consumer.js";
 import { usageReport } from "../application/usage-report.js";
 import { EXIT_CANCELLED, ProviderError, isAbortError } from "../domain/errors.js";
 import { snapshotRequest } from "../domain/generation.js";
@@ -25,7 +25,7 @@ import type { Provider } from "../domain/provider.js";
 import type { ResolvedSettings } from "../domain/settings.js";
 import { styleInstructions } from "../domain/settings.js";
 import { formatDuration, formatUsage } from "../help.js";
-import { EXIT_OK, write } from "../io.js";
+import { EXIT_FAILURE, EXIT_OK, write } from "../io.js";
 import type { Io } from "../io.js";
 import type { LineInput } from "../line-input.js";
 import { displayPath } from "../storage/fs/errors.js";
@@ -317,7 +317,12 @@ export class PlainChat {
       this.phase = "busy";
       throw end.error; // nothing is committed; the chat ends with the output failure
     }
-    if (end.kind === "stuck") {
+    if (end.kind === "unclosed" && !controller.signal.aborted) {
+      if (shown.printed) await this.out("\n");
+      await write(io.stderr, `${PROGRAM_NAME}: error: ${STREAM_UNCLOSED}\n`);
+      return EXIT_FAILURE; // nothing committed, and no further request after an unclosed stream
+    }
+    if (end.kind === "stuck" || end.kind === "unclosed") {
       if (shown.printed) await this.out("\n");
       await write(io.stderr, `${PROGRAM_NAME}: interrupted\n`);
       return EXIT_CANCELLED;

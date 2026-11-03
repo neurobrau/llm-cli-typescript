@@ -133,8 +133,8 @@ export class ThinkFilter {
       case "undecided": {
         this.pending += text;
         const trimmed = this.pending.trimStart();
-        if (THINK_OPEN.startsWith(trimmed)) {
-          return NOTHING; // could still become the opening tag
+        if (trimmed.length < THINK_OPEN.length && THINK_OPEN.startsWith(trimmed)) {
+          return NOTHING; // a strict prefix could still become the opening tag; the full tag is recognized at once
         }
         if (!trimmed.startsWith(THINK_OPEN)) {
           this.state = "answer";

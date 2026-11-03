@@ -7,7 +7,7 @@ import { EXIT_CANCELLED, ProviderError, SettingsError, exitCodeForKind, isAbortE
 import type { GenerationRequest, ProviderId } from "./domain/generation.js";
 import type { Provider } from "./domain/provider.js";
 import { styleInstructions } from "./domain/settings.js";
-import { consumeStream } from "./application/stream-consumer.js";
+import { STREAM_UNCLOSED, consumeStream } from "./application/stream-consumer.js";
 import { EDITION_TITLE, formatDuration, formatUsage, helpText, usageHint, versionText } from "./help.js";
 import { OpenAIProvider } from "./providers/openai/provider.js";
 import { EXIT_BROKEN_PIPE, EXIT_FAILURE, EXIT_INCOMPLETE, EXIT_OK, EXIT_USAGE, OutputError, hasErrorCode, write } from "./io.js";
@@ -225,6 +225,13 @@ async function streamPrompt(
   );
   if (end.kind === "output-error") {
     throw end.error; // the original OutputError; no further stdout writes
+  }
+  if (end.kind === "unclosed" && !signal.aborted) {
+    if (output.printed) {
+      await write(io.stdout, "\n");
+    }
+    await write(io.stderr, `${PROGRAM_NAME}: error: ${STREAM_UNCLOSED}\n`);
+    return EXIT_FAILURE;
   }
   if (end.kind !== "terminal" || signal.aborted) {
     if (output.printed) {

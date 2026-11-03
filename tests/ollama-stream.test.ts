@@ -152,6 +152,8 @@ void describe("ThinkFilter", () => {
   void it("flags an unclosed block and never turns it into an answer", () => {
     assertAtEveryBoundary("<think>still thinking", { answer: "", reasoning: "still thinking", unclosed: true });
     assertAtEveryBoundary("<think>half </thi", { answer: "", reasoning: "half </thi", unclosed: true });
+    assertAtEveryBoundary("<think>", { answer: "", reasoning: "", unclosed: true });
+    assertAtEveryBoundary(" \n\t<think>", { answer: "", reasoning: "", unclosed: true });
   });
 
   void it("passes reasoning on while the block is open, holding only a possible closing tag", () => {
@@ -312,6 +314,29 @@ void describe("Ollama streaming: records", { timeout: 30_000 }, () => {
     const failed = failedOf(await run([piece("<think>unfinished"), done()]));
     assert.match(failed.error.message, /reasoning block never ended/);
     assert.equal(failed.partialText, "");
+  });
+
+  void it("a bare opening tag is never answer text: failed when claimed complete, incomplete with length", async () => {
+    for (const chunks of [["<think>"], [" \n<think>"], ["<thi", "nk>"], [" ", "<", "think", ">"]]) {
+      const failed = failedOf(await run([...chunks.map((c) => piece(c)), done()]));
+      assert.match(failed.error.message, /reasoning block never ended/);
+      assert.equal(failed.partialText, "");
+      const events = await run([...chunks.map((c) => piece(c)), done({ done_reason: "length", eval_count: 2 })]);
+      assert.equal(answerOf(events), "");
+      const incomplete = terminalOf(events);
+      assert.ok(incomplete.kind === "incomplete");
+      assert.equal(incomplete.partialText, "");
+    }
+  });
+
+  void it("genuine partial prefixes stay ordinary text, including with length", async () => {
+    for (const prefix of ["<", "<t", "<th", "<thin", "<think"]) {
+      assert.equal(answerOf(await run([piece(prefix), done()])), prefix);
+      const events = await run([piece(prefix), done({ done_reason: "length" })]);
+      const incomplete = terminalOf(events);
+      assert.ok(incomplete.kind === "incomplete");
+      assert.equal(incomplete.partialText, prefix);
+    }
   });
 
   void it("a reasoning-only or empty completed answer is allowed", async () => {

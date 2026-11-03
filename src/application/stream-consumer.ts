@@ -9,14 +9,18 @@
  * deadlines. It stops at the first terminal event and never looks at anything
  * after it.
  *
- * Whatever the outcome, the iterator is closed (`return()`) and, for
- * cancellation and output failures, the request is aborted first. Waiting for
- * a provider that does not react is bounded by `cleanupMs`; then the result is
- * `stuck` and no late event is ever processed.
+ * Whatever the outcome, the iterator is closed (`return()`) exactly once and
+ * the request is aborted first. Waiting for a provider that does not react is
+ * bounded by `cleanupMs` on every path. When the caller cancelled, the result
+ * is `stuck`; otherwise a terminal or failed stream becomes `unclosed` (an
+ * output failure keeps its original error). No late event is ever processed.
  */
 import { ProviderError, isAbortError, isAborted } from "../domain/errors.js";
 import { isTerminalEvent } from "../domain/generation.js";
 import type { StreamEvent, TerminalStreamEvent } from "../domain/generation.js";
+
+/** Fixed, safe diagnostic when a finished stream could not be closed. */
+export const STREAM_UNCLOSED = "the response stream could not be closed";
 
 export type StreamEnd =
   | { readonly kind: "terminal"; readonly event: TerminalStreamEvent }
@@ -25,7 +29,9 @@ export type StreamEnd =
   /** As `cancelled`, but the provider did not settle within the bound. */
   | { readonly kind: "stuck" }
   /** `onText` threw; the request was aborted and the original error is kept. */
-  | { readonly kind: "output-error"; readonly error: unknown };
+  | { readonly kind: "output-error"; readonly error: unknown }
+  /** The stream ended on its own but `return()` did not settle within the bound; nothing may be committed. */
+  | { readonly kind: "unclosed" };
 
 export interface StreamConsumption {
   readonly end: StreamEnd;
@@ -87,6 +93,13 @@ export async function consumeStream(
     return outcome !== "late";
   };
 
+  /** The outcome of a path that ended on its own: only a clean close lets it stand. */
+  const concluded = async (end: StreamEnd, pending?: Promise<Settled<unknown>>): Promise<StreamConsumption> => {
+    if (await close(pending)) return { end, text };
+    if (isAborted(parent)) return { end: { kind: "stuck" }, text };
+    return { end: end.kind === "output-error" ? end : { kind: "unclosed" }, text };
+  };
+
   try {
     try {
       iterator = open(own.signal)[Symbol.asyncIterator]();
@@ -100,44 +113,37 @@ export async function consumeStream(
       if (parent.aborted) {
         return { end: { kind: (await close(undefined)) ? "cancelled" : "stuck" }, text };
       }
-      const pulled = settle(iterator.next());
+      // A synchronous throw of next() is a rejection like any other and still reaches the guarded close.
+      const current = iterator;
+      const pulled = settle(Promise.resolve().then(() => current.next()));
       const first = await Promise.race([pulled, parentAborted]);
       if (first === "abort" || isAborted(parent)) {
         return { end: { kind: (await close(pulled)) ? "cancelled" : "stuck" }, text };
       }
       if (!first.ok) {
         const error = first.error;
-        await close(undefined);
         if (error instanceof ProviderError) {
-          return { end: { kind: "terminal", event: failed(error, text) }, text };
+          return await concluded({ kind: "terminal", event: failed(error, text) });
         }
         if (isAbortError(error)) {
-          return {
-            end: { kind: "terminal", event: failed(new ProviderError("The response stream was interrupted.", "api"), text) },
-            text,
-          };
+          return await concluded({ kind: "terminal", event: failed(new ProviderError("The response stream was interrupted.", "api"), text) });
         }
+        await close(undefined);
         throw error; // an unexpected failure keeps the existing fixed internal-error handling
       }
       const result = first.value;
       if (result.done === true) {
-        await close(undefined);
-        return {
-          end: { kind: "terminal", event: failed(new ProviderError("The response stream ended without a result.", "api"), text) },
-          text,
-        };
+        return await concluded({ kind: "terminal", event: failed(new ProviderError("The response stream ended without a result.", "api"), text) });
       }
       const event = result.value;
       if (isTerminalEvent(event)) {
-        await close(undefined);
-        return { end: { kind: "terminal", event }, text };
+        return await concluded({ kind: "terminal", event });
       }
       if (event.kind === "text" && event.text !== "") {
         try {
           await onText(event.text);
         } catch (error: unknown) {
-          await close(undefined);
-          return { end: { kind: "output-error", error }, text };
+          return await concluded({ kind: "output-error", error });
         }
         text += event.text;
       }
