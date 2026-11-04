@@ -18,19 +18,21 @@ export function helpText(version: string): string {
   return `usage: ${PROGRAM_NAME} [-h] [--version] [--provider PROVIDER] [--model MODEL_ID]
                  [--reasoning-effort EFFORT] [--max-output-tokens N]
                  [--answer-style STYLE] [--usage] [--stream] [--plain]
-                 [--no-history]
+                 [--no-history] [--transcript-on-exit]
                  [prompt]
 
 ${EDITION} ${version}
 
 With a prompt, sends it once to OpenAI or a local Ollama server and prints
 the answer; no history or saved settings are used.
-Without a prompt, starts a line-oriented chat (YOU > / AI >) that continues
-the last saved conversation, saves each completed exchange and applies saved
-settings. With --stream the answer is printed as it arrives (one-shot and
-chat). Cost estimates, provider/model switching and the fullscreen interface
-are future work. OpenAI requires OPENAI_API_KEY in the
-environment. Ollama needs no key; OLLAMA_HOST selects the server (default
+Without a prompt, starts a chat that continues the last saved conversation,
+saves each completed exchange and applies saved settings: a fullscreen
+DOS-style interface on a supported terminal (xterm, screen, tmux, rxvt
+families), otherwise (or with --plain, or when input/output is not a
+terminal) a line-oriented chat (YOU > / AI >). With --stream the answer is
+printed as it arrives. Cost estimates and the F2-F6 settings menus
+(provider/model switching) are future work. OpenAI requires OPENAI_API_KEY
+in the environment. Ollama needs no key; OLLAMA_HOST selects the server (default
 http://127.0.0.1:11434).
 
 positional arguments:
@@ -55,10 +57,14 @@ options:
   --usage                    print reported token usage to stderr
   --stream                   print the answer as it arrives; Ctrl+C cancels
                              and nothing of a partial answer is saved
-  --plain                    line-oriented chat (the only chat mode for now);
+  --plain                    line-oriented chat even on a capable terminal;
                              not allowed with a prompt
   --no-history               chat without reading or saving conversations;
                              not allowed with a prompt
+  --transcript-on-exit       fullscreen chat only: after the terminal is
+                             restored, print the committed conversation
+                             (no effect in the plain chat); not allowed with
+                             a prompt
 
 In chat: /help, /reset, /cleanup, /usage and /exit (also with a backslash).
 Use -- before a prompt that starts with a dash.

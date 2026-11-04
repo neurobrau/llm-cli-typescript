@@ -41,7 +41,7 @@ void describe("run", () => {
       const text = out.join("");
       assert.match(text, /^usage: neurobrau /);
       assert.match(text, /--version/);
-      assert.match(text, /Without a prompt, starts a line-oriented chat/);
+      assert.match(text, /Without a prompt, starts a chat/);
     }
   });
 

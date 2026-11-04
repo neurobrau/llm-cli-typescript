@@ -17,12 +17,12 @@ function error(argv: readonly string[]): string {
 }
 
 void describe("parseCliArgs: chat dispatch", () => {
-  void it("no arguments, --plain and bare -- start the same plain chat", () => {
-    const expected = { usage: false, stream: false, noHistory: false };
+  void it("no arguments and bare -- start the same chat; --plain is preserved and idempotent", () => {
+    const expected = { usage: false, stream: false, noHistory: false, plain: false, transcriptOnExit: false };
     assert.deepEqual(chat([]), expected);
-    assert.deepEqual(chat(["--plain"]), expected);
     assert.deepEqual(chat(["--"]), expected);
-    assert.deepEqual(chat(["--plain", "--plain"]), expected); // idempotent
+    assert.deepEqual(chat(["--plain"]), { ...expected, plain: true });
+    assert.deepEqual(chat(["--plain", "--plain"]), { ...expected, plain: true });
   });
 
   void it("tracks whether the provider was given explicitly", () => {
@@ -36,7 +36,7 @@ void describe("parseCliArgs: chat dispatch", () => {
   void it("carries every generation option and --no-history", () => {
     assert.deepEqual(
       chat(["--no-history", "--no-history", "--provider", "ollama", "--model", "q", "--reasoning-effort", "low", "--max-output-tokens", "9", "--answer-style", "brief", "--usage"]),
-      { provider: "ollama", model: "q", reasoning: "low", maxOutputTokens: 9, answerStyle: "brief", usage: true, stream: false, noHistory: true },
+      { provider: "ollama", model: "q", reasoning: "low", maxOutputTokens: 9, answerStyle: "brief", usage: true, stream: false, noHistory: true, plain: false, transcriptOnExit: false },
     );
   });
 
@@ -49,7 +49,7 @@ void describe("parseCliArgs: chat dispatch", () => {
     assert.match(error(["--bogus"]), /unknown option/);
     assert.match(error(["a", "b"]), /exactly one prompt/);
     assert.match(error(["--stream=yes"]), /does not take a value/);
-    assert.match(error(["--transcript-on-exit"]), /unsupported option/);
+    assert.match(error(["--transcript-on-exit=1"]), /does not take a value/);
   });
 
   void it("help and version conflict with chat switches; --help stays help", () => {
@@ -91,6 +91,6 @@ void describe("parseCliArgs: --stream", () => {
     assert.match(error(["--version", "--stream"]), /cannot be combined/);
     assert.match(error(["--stream", "--plain", "p"]), /cannot be used with a prompt/);
     assert.match(error(["--stream", "--no-history", "p"]), /cannot be used with a prompt/);
-    assert.match(error(["--stream", "--transcript-on-exit"]), /unsupported option/);
+    assert.match(error(["--stream", "--transcript-on-exit", "p"]), /cannot be used with a prompt/);
   });
 });

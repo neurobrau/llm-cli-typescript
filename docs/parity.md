@@ -2,7 +2,7 @@
 
 ## Current scope and limitations
 
-`0.2.0` (the completed `0.1.0` CLI Foundation behavior is unchanged) implements `-h`/`--help`, `--version`, a one-shot prompt for OpenAI and Ollama (`--provider openai|ollama`), the plain chat (`--plain`, `--no-history`) with persistent history and read-only saved settings, and `--stream` for both (Task 007). Not implemented: pricing and cost estimates, provider/model switching, model-discovery commands, terminal UI, `--transcript-on-exit`. Exit codes 1-8, 130 and 141 are produced for the one-shot path.
+`0.3.0-dev` (the completed `0.1.0` and `0.2.0` behavior is unchanged) implements `-h`/`--help`, `--version`, a one-shot prompt for OpenAI and Ollama (`--provider openai|ollama`), the chat with persistent history and read-only saved settings in two front ends — the fullscreen DOS-style chat on supported terminals and the line-oriented chat (`--plain`, pipes, other terminals) — `--no-history`, `--transcript-on-exit` (fullscreen only) and `--stream` for both (Tasks 007, 008). **Not implemented:** pricing and cost estimates, the F2–F6 selection menus, provider/model switching and the preference writes they imply (spec sections 4b, 4c, 13 writes, 15), model-discovery commands. Menu and pricing parity is not claimed. Exit codes 1-8, 130 and 141 are produced for the one-shot path.
 
 ## References
 
@@ -95,6 +95,20 @@ References: Python `docs/tui-spec.md` §12/§14/§15/§16 and the Python/Go stre
 - **One-shot**: stdout is flushed per delta by awaiting each write; the final newline precedes stderr output. The `Duration:` line follows Go's `FormatDuration` (total required; load and generation only when positive) and is printed only for completed answers with `--usage`. `--usage` after an incomplete answer prints usage when reported (as Go).
 - **Chat**: the save happens before the closing newline of an accepted answer (Go prints the newline, then commits). Incomplete answers record reported usage (§15) instead of leaving the file unchanged (older §14 wording); a first incomplete-only conversation stays unsaved until a completed turn (Task 006 policy).
 - **Bounded cancellation**: after Ctrl+C the chat waits at most the cleanup bound for the stream to settle and exits 130 if it does not; Python's worker threads and Go's goroutine drain have no equivalent bound.
+
+## Fullscreen chat differences (Task 008)
+
+References: Python `docs/tui-spec.md` §1–10, 11, 14, 16 and `ui/tui.py`, `ui/status.py`; Go `internal/tui` (`wrap.go`, `layout.go`, `panel.go`, `app.go`, tests). Only the cases shared with the Go `wrap_test.go` and the Python `test_tui*.py` fixtures read for this task were reused as test data; the rest of the expectations are derived from the spec text.
+
+- **Terminal support** is limited to the tested ANSI/VT families (xterm, screen, tmux, rxvt and variants) on Linux; other `TERM` values use the plain chat. The references use curses/terminfo (Python) and tcell (Go).
+- **No menus**: F2–F6 show a pending-feature warning instead of the menus; the panel headings are the final ones. Provider/model switching, `active.json` updates on switching, saved-setting writes and the `Connecting | Checking …` states are absent. `COST (EST.)` shows `unavailable`.
+- **Concurrency**: Node async I/O instead of Python's worker thread and queue; the same observable contract (a bounded, pull-based handoff, 256 events per yield, one request at a time, retired identity on cancel, 0.1 s redraw). Unlike Python's documented limitation, cancellation closes the connection immediately and a new request waits for that close; a provider that does not close within the bound ends the program with exit 130.
+- **`DONE` timing**: the status appears after the exchange was saved (Python: also after the save, but synchronously); during the save Enter is refused with `Please wait; the conversation is being updated`.
+- **Title**: the actual package version and the TypeScript edition name; the `scrolled up N (PgDn)` suffix keeps priority over a long title.
+- **Input**: draft capped at the plain chat's 8 Mi limit (excess dropped with a warning); decoding is built in (no terminfo), covering xterm/rxvt/tmux/`SS3` forms; bracketed paste is not enabled, so a pasted newline submits like Enter.
+- **Rendering safety**: control characters in model/user/history text are replaced when rendered (Python/Go pass text to curses/tcell, which handle it themselves). `--transcript-on-exit` is a deliberate difference: the spec prints content unchanged, but when stdout is a terminal this edition neutralizes ESC and other unsafe controls in the printed copy (newlines and tabs kept; stored messages untouched), because the text is model output written to the user's real terminal. Non-TTY output stays exact.
+- **EOF / SIGHUP / SIGTERM**: end of terminal input exits 0; SIGHUP 129 and SIGTERM 143 (the spec lists none of these).
+- **Tab expansion** is column-aware (stops of four), like Python's `expandtabs(4)` and Go.
 
 ## Proposed future decisions (not implemented, not yet accepted by the owner)
 

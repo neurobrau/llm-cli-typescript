@@ -59,7 +59,7 @@ export async function runChat(invocation: ChatInvocation, io: Io, deps: ChatRunD
   }
 }
 
-async function startupFailure(error: unknown, signal: AbortSignal, io: Io): Promise<number> {
+export async function startupFailure(error: unknown, signal: AbortSignal, io: Io): Promise<number> {
   if (isAbortError(error) || signal.aborted) return interrupted(io);
   if (error instanceof SettingsError) {
     await write(io.stderr, `${PROGRAM_NAME}: error: ${error.message}\n`);
@@ -72,13 +72,13 @@ async function startupFailure(error: unknown, signal: AbortSignal, io: Io): Prom
   throw error;
 }
 
-async function interrupted(io: Io): Promise<number> {
+export async function interrupted(io: Io): Promise<number> {
   await write(io.stderr, `${PROGRAM_NAME}: interrupted\n`);
   return EXIT_CANCELLED;
 }
 
 /** Input failures and unexpected internal errors: fixed, safe text; nothing from the exception is printed. */
-async function fixedFailure(error: unknown, io: Io): Promise<number> {
+export async function fixedFailure(error: unknown, io: Io): Promise<number> {
   const text = error instanceof InputError ? "could not read input" : "an internal error occurred";
   await write(io.stderr, `${PROGRAM_NAME}: error: ${text}\n`);
   return EXIT_FAILURE;

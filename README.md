@@ -1,6 +1,6 @@
 # NeuroBräu TypeScript
 
-TypeScript edition of the NeuroBräu LLM CLI. The current version is `0.2.0` (the completed interactive chat, history and streaming milestone); the earlier completed CLI Foundation milestone was `0.1.0`. It can send **one one-shot prompt** to **OpenAI** (Responses API, official `openai` SDK 7.45.0) or to a **local Ollama server** (native HTTP API, no extra dependency) and print the answer, and, without a prompt, it runs a **line-oriented chat** (`YOU >` / `AI >`) on the same providers that restores and saves conversations, applies saved settings and understands `/help`, `/reset`, `/cleanup`, `/usage` and `/exit`. With `--stream` the answer is printed as it arrives, in both modes (real incremental streaming from OpenAI Responses and native Ollama). There is no pricing or cost estimate, provider/model switching, or fullscreen TUI yet. Conversation, `active.json`, settings and usage-record JSON follow the Python reference formats (`docs/storage.md`). No Git tag or release exists for any version.
+TypeScript edition of the NeuroBräu LLM CLI. The current version is `0.3.0-dev` (work toward the fullscreen chat milestone); the completed milestones were `0.1.0` (CLI Foundation) and `0.2.0` (interactive chat, history, streaming). It can send **one one-shot prompt** to **OpenAI** (Responses API, official `openai` SDK 7.45.0) or to a **local Ollama server** (native HTTP API, no extra dependency) and print the answer, and, without a prompt, it runs a **fullscreen DOS-style chat** on a supported terminal (xterm, screen, tmux and rxvt families; see `docs/tui.md`) or, otherwise, a **line-oriented chat** (`YOU >` / `AI >`) on the same providers that restores and saves conversations, applies saved settings and understands `/help`, `/reset`, `/cleanup`, `/usage` and `/exit`. With `--stream` the answer is printed as it arrives, in both modes (real incremental streaming from OpenAI Responses and native Ollama). The fullscreen chat shows the current settings and token totals but has no F2–F6 selection menus, provider/model switching, preference writes or pricing yet (the cost field says `unavailable`). Conversation, `active.json`, settings and usage-record JSON follow the Python reference formats (`docs/storage.md`). No Git tag or release exists for any version.
 
 ## Prerequisites
 
@@ -19,21 +19,22 @@ npm run build
 ## Usage
 
 ```sh
-node dist/cli.js                    # plain chat (continues the last conversation)
+node dist/cli.js                    # chat: fullscreen on a capable terminal, else plain (continues the last conversation)
 node dist/cli.js --help             # or -h
-node dist/cli.js --version          # NeuroBräu TypeScript CLI 0.2.0
+node dist/cli.js --version          # NeuroBräu TypeScript CLI 0.3.0-dev
 export OPENAI_API_KEY=...           # read only when a prompt is sent
 node dist/cli.js "What is a neural network?"
 node dist/cli.js --provider ollama "What is a neural network?"   # first local model, no key
 node dist/cli.js --stream --usage "Explain neural networks briefly."
 node dist/cli.js --plain --stream --provider ollama --model qwen3.5:4b
+node dist/cli.js --stream --transcript-on-exit --provider ollama --model qwen3.5:4b   # fullscreen; prints the conversation after leaving
 ```
 
 ```text
 neurobrau [--provider openai|ollama] [--model MODEL_ID]
           [--reasoning-effort EFFORT] [--max-output-tokens N]
           [--answer-style brief|normal|detailed] [--usage] [--stream] "prompt"
-neurobrau [same options] [--plain] [--no-history]          # chat: no prompt
+neurobrau [same options] [--plain] [--no-history] [--transcript-on-exit]   # chat: no prompt
 ```
 
 - Defaults: provider `openai`, model `gpt-6-luna` (the project default; any model ID may be given with `--model` and is not checked against the live Models API), answer style `normal`. With `--provider ollama` the default model is the first selectable local model in Ollama's `/api/tags` order.
@@ -51,9 +52,8 @@ Invalid invocations exit 2 before any key lookup or network use:
 | Input | Result |
 | --- | --- |
 | unknown option | `unknown option` |
-| `--transcript-on-exit` | `unsupported option … not implemented yet` |
 | `--stream=value` | `option … does not take a value` |
-| `--plain` or `--no-history` together with a prompt | `option … cannot be used with a prompt` (exit 2, before any provider, key, file or network use) |
+| `--plain`, `--no-history` or `--transcript-on-exit` together with a prompt | `option … cannot be used with a prompt` (exit 2, before any provider, key, file or network use) |
 | an unknown provider (anything but `openai`/`ollama`) | `invalid provider … expected openai or ollama` |
 | an invalid `OLLAMA_HOST` (only with `--provider ollama`) | `Invalid OLLAMA_HOST: …` |
 | empty or blank prompt, or more than one positional | prompt error |
@@ -62,7 +62,7 @@ Invalid invocations exit 2 before any key lookup or network use:
 | invalid effort, style, provider, or token count (not a positive safe integer) | named diagnostic |
 | an effort or limit the model is known not to support | settings error from the resolver |
 
-Repeated identical `--help`, `--version`, `--usage` and `--stream` switches are idempotent. A value for `--model` and similar options that starts with `-` must use the `--option=value` form.
+Repeated identical `--help`, `--version`, `--usage`, `--stream`, `--plain`, `--no-history` and `--transcript-on-exit` switches are idempotent. A value for `--model` and similar options that starts with `-` must use the `--option=value` form.
 
 ### Manual chat smoke test (owner-run, local Ollama, isolated state)
 
@@ -137,6 +137,49 @@ run --stream "Count from 1 to 500, one number per line." | head -n 3
 echo "exit codes: ${PIPESTATUS[*]}"              # bash: the first (neurobrau) should be 141, quiet on stderr
 ```
 
+### Fullscreen chat (see `docs/tui.md`)
+
+Without a prompt, on a terminal whose `TERM` is in the xterm, screen, tmux or rxvt family and with stdin and stdout both attached to it, the chat is fullscreen (DOS-style, ASCII borders, a settings/tokens panel on the right at 64+ columns, minimum 40x12). `--plain`, pipes, redirects and any other `TERM` keep the line-oriented chat, which prints no escape sequences. `--transcript-on-exit` (fullscreen only) prints the committed conversation after the terminal is restored. The F2–F6 keys only show `WARNING | Settings menus are not implemented yet`; choose settings with the command-line options. Keys: Enter, Backspace/Delete, Left/Right, Home/Ctrl+A, End/Ctrl+E, Ctrl+U, Up/Down, PgUp/PgDn, F1 (`/help`), Ctrl+D on an empty line, Ctrl+C (cancels a running request, otherwise exits 130).
+
+### Manual fullscreen smoke test (OWNER-RUN; NOT executed by the agent or the test suite)
+
+The automated tests use fake terminals, loopback servers and a Linux pseudo-terminal only. Nothing below has been run against a real terminal emulator, real Ollama or OpenAI; no live interoperability is claimed until you run it. Use an interactive terminal (xterm-like `TERM`), `qwen3.5:4b`, and a fresh throw-away tree; the OpenAI key stays in your environment for the OpenAI line (do not use the `env -u` wrapper there).
+
+```sh
+S=$(mktemp -d -t neurobrau-tui.XXXXXX)
+tui() { env -u OPENAI_API_KEY HOME="$S/home" XDG_STATE_HOME="$S/state" XDG_CONFIG_HOME="$S/config" node dist/cli.js --provider ollama --model qwen3.5:4b --reasoning-effort none "$@"; }
+
+# 1. streaming and non-streaming fullscreen (check the status bar: CONNECTING/GENERATING/DONE; the panel's TOKENS fill in)
+tui --stream
+tui
+
+# 2. Unicode editing, scrolling, resize
+#    type "Grüß Gott Привет 😀", use Left/Right/Home/End/Delete/Backspace/Ctrl+U, paste a long line (the field scrolls)
+#    ask for a long answer ("Count from 1 to 80, one number per line"), PgUp/PgDn/Up/Down: the title shows "scrolled up N (PgDn)"
+#    shrink the window below 40x12 (the "Terminal too small" text), type something, enlarge it again: the draft and screen return
+
+# 3. cancel after the first visible text, then a normal request in the same screen
+#    ask "Write a long story about a brewer.", press Ctrl+C after a few words -> "Cancelled. The partial answer above was not saved."
+#    then ask "Reply with one word: ok" -> a normal answer; /usage must count only completed requests
+
+# 4. restart/restore, /reset, /cleanup (only the throw-away tree is touched)
+tui --stream            # shows the previous exchange and "Restored conversation ..."
+#    /reset (new empty conversation, totals cleared), /cleanup (answer yes), Ctrl+D
+
+# 5. fallbacks: --plain and a pipe keep the line-oriented chat with no escape sequences
+tui --plain --stream
+printf 'Reply with one word.\n/exit\n' | tui --stream | cat -v | head      # no ^[ sequences, YOU > prompts
+
+# 6. transcript-on-exit after the terminal was restored (scrollback shows the conversation as YOU > / AI > text)
+tui --stream --transcript-on-exit
+
+# 7. OpenAI (real, billable; the key must be exported in this shell)
+export OPENAI_API_KEY=...   # your real key
+runkey() { HOME="$S/home" XDG_STATE_HOME="$S/state" XDG_CONFIG_HOME="$S/config" node dist/cli.js "$@"; }
+runkey --provider openai --stream
+echo "after exit run: reset"; reset   # only if your terminal looks wrong after an abnormal kill; SIGKILL cannot be restored by any program
+```
+
 ### Manual smoke test (owner-run, makes real, billable requests)
 
 Not run by the agent or the test suite:
@@ -182,7 +225,7 @@ Tests include unit tests, runner tests with injected writers, and integration te
 
 ## Planned milestones
 
-Pricing and cost estimates, provider/model switching and a terminal UI come in later tasks (OpenAI and Ollama one-shot, the plain chat with history and `--stream` are done). Version plan: `0.1.0` completed CLI Foundation; `0.2.0` completed chat/history/streaming (current); `0.3.0-dev`/`0.3.0` for the TUI; `0.4.0-dev`/`0.4.0` for full parity. See `docs/architecture.md` and `docs/parity.md`.
+Pricing and cost estimates, the F2–F6 selection menus and provider/model switching come in later tasks (OpenAI and Ollama one-shot, the plain chat with history, `--stream` and the fullscreen chat foundation are implemented). Version plan: `0.1.0` completed CLI Foundation; `0.2.0` completed chat/history/streaming; `0.3.0-dev` (current) while the TUI is built, `0.3.0` when it is complete; `0.4.0-dev`/`0.4.0` for full parity. See `docs/architecture.md` and `docs/parity.md`.
 
 ## Working documents
 

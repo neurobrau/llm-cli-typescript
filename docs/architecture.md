@@ -1,6 +1,6 @@
 # Architecture
 
-Status: `0.2.0` (milestone 0.2 completed after the owner smoke tests). The completed CLI Foundation (`0.1.0`: non-streaming OpenAI and Ollama one-shot) is behavior-preserved; the plain chat with persistent history and read-only saved settings is connected (Task 006) and `--stream` is implemented for both providers and both front ends (Task 007). No tag or release has been created or published.
+Status: `0.3.0-dev` (the fullscreen chat foundation, Task 008, is implemented; the `0.2.0` milestone — plain chat, history, streaming — was completed after the owner smoke tests). The completed CLI Foundation (`0.1.0`: non-streaming OpenAI and Ollama one-shot) is behavior-preserved; the plain chat with persistent history and read-only saved settings is connected (Task 006) and `--stream` is implemented for both providers and both front ends (Task 007). No tag or release has been created or published.
 
 ## CLI composition
 
@@ -156,8 +156,8 @@ Layers (dependencies point downward; nothing below knows the layers above):
 | --- | --- |
 | Completed CLI Foundation (OpenAI + Ollama non-streaming) | 0.1.0 (done) |
 | Work on chat/history/streaming | 0.2.0-dev (done) |
-| Completed interactive chat milestone | 0.2.0 (current) |
-| TUI development / completed TUI | 0.3.0-dev / 0.3.0 |
+| Completed interactive chat milestone | 0.2.0 (done) |
+| TUI development / completed TUI | 0.3.0-dev (current) / 0.3.0 |
 | Full parity development / completed milestone | 0.4.0-dev / 0.4.0 |
 
 Patch releases of a completed milestone (0.1.x) require owner approval.
@@ -166,9 +166,21 @@ Patch releases of a completed milestone (0.1.x) require owner approval.
 
 Planned, created only when real code needs them: `src/domain/` (messages, usage, settings), `src/providers/` (OpenAI/Ollama adapters), `src/application/` (engine, sessions, request lifecycle with `AbortController`), `src/storage/` (codecs, paths, atomic writes), `src/ui/`, `src/pricing/`. Domain code will not import provider SDKs, the filesystem, or a TUI. See `docs/architecture-roadmap.md` for the full analysis.
 
-## TUI
+## Fullscreen chat (Task 008)
 
-Undecided. The choice (Ink, Blessed, a custom ANSI renderer, …) waits for a focused spike on Node 24 and Ptyxis covering keyboard handling (F-keys, paging), resize, and terminal restoration on signals. No TUI dependency is installed.
+Details, keys and limits are in `docs/tui.md`. Layers (`src/tui/`):
+
+| Module | Responsibility |
+| --- | --- |
+| `text.ts`, `layout.ts`, `panel.ts`, `status.ts`, `editor.ts`, `keys.ts`, `frame.ts`, `render.ts` | Pure logic: display neutralization and wrapping, geometry, the settings/token panel (exact bigint sums), status texts, the input editor, the key decoder, the cell grid and the render function. No I/O, no process, provider or terminal imports. |
+| `model.ts` | Visible state: entries (with wrap cache), scroll, draft, status, flash. No provider or storage objects. |
+| `controller.ts` | Owns request identity and every state change; talks only to the injected `Terminal`, `Timers`, `Provider` and `ChatSession`. Request ownership, the synchronous accept/commit step, bounded cleanup, exit sequencing and coalesced, backpressured drawing live here. |
+| `terminal.ts` | The ports: `Terminal`, `Timers`, `SignalSource`, `TerminalEnvironment`, `TuiHost`. |
+| `ansi-terminal.ts` | The production adapter (alternate screen, raw mode, cursor, styles, listeners); constructed explicitly, changes nothing on import, restores exactly what it changed, once. |
+| `eligibility.ts` | The single place that decides fullscreen versus plain. |
+| `run-tui.ts` | Composition: existing startup first, then terminal and controller, exit-code mapping, diagnostics, transcript. |
+
+`src/main.ts` receives an optional `tui` host; without it (every default composition and all pre-existing tests) the chat is always the plain chat and no terminal fact is read. `src/cli.ts` supplies the real TTY facts, signal wiring and `AnsiTerminal`. `consumeStream` gained one optional observer that is told *that* reasoning arrived (never its text); its close-once, bounded-cleanup and backpressure behavior is unchanged. `PlainChat` is untouched; the fullscreen chat does not parse printed output of another front end.
 
 ## References
 

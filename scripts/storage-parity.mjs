@@ -17,8 +17,10 @@ import { Buffer } from "node:buffer";
 import { spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
+import { performance } from "node:perf_hooks";
 import { join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
+import { clearInterval, clearTimeout, setInterval, setTimeout } from "node:timers";
 
 const ROOT = resolve(import.meta.dirname, "..");
 const PYTHON = process.env.NEUROBRAU_PYTHON ?? "python3";
@@ -229,6 +231,60 @@ async function runSession(main, root, argv, lines, provider) {
   return code;
 }
 
+/** Drives the real fullscreen controller with a fake terminal: [keys, text that must appear on screen next] steps. */
+async function runFullscreen(main, root, argv, steps, provider) {
+  let handlers;
+  let screen = "";
+  const terminal = {
+    open(given) {
+      handlers = given;
+    },
+    size: () => ({ rows: 25, cols: 80 }),
+    async draw(frame) {
+      screen = frame.chars.map((row) => row.join("")).join("\n");
+    },
+    async close() {},
+  };
+  const timers = {
+    now: () => performance.now(),
+    after: (ms, callback) => {
+      const timer = setTimeout(callback, ms);
+      return { cancel: () => clearTimeout(timer) };
+    },
+    every: (ms, callback) => {
+      const timer = setInterval(callback, ms);
+      return { cancel: () => clearInterval(timer) };
+    },
+  };
+  const host = {
+    environment: () => ({ stdinIsTTY: true, stdoutIsTTY: true, term: "xterm-256color", rawModeSupported: true, color: true }),
+    createTerminal: () => terminal,
+    signals: { register: () => () => undefined },
+    timers,
+  };
+  let ticks = 0;
+  const finished = main.run(argv, { stdout: () => undefined, stderr: () => undefined }, {
+    createProvider: () => provider,
+    storageEnvironment: { env: { XDG_STATE_HOME: join(root, "state"), XDG_CONFIG_HOME: join(root, "config") } },
+    clock: () => new Date(Date.UTC(2026, 9, 23, 11, 0, ticks++)),
+    newId: (() => {
+      let n = 100;
+      return () => `00000000-0000-4000-8000-${String(++n).padStart(12, "0")}`;
+    })(),
+    tui: host,
+  });
+  const until = async (condition) => {
+    for (let i = 0; i < 5000 && !condition(); i += 1) await new Promise((resolve) => setTimeout(resolve, 2));
+    if (!condition()) throw new Error(`the fullscreen session did not reach the expected screen:\n${screen}`);
+  };
+  await until(() => handlers !== undefined && screen !== "");
+  for (const [keys, expected] of steps) {
+    handlers.onData(keys);
+    if (expected !== undefined) await until(() => screen.includes(expected));
+  }
+  return finished;
+}
+
 async function sessionChecks(codecs, pythonConversation) {
   const main = await import(pathToFileURL(join(ROOT, "dist", "main.js")).href);
   const failures = [];
@@ -271,6 +327,42 @@ async function sessionChecks(codecs, pythonConversation) {
   collect(streamed, "streamed");
   for (const [name, bytes] of files) {
     if (name.includes("_streamed_") && bytes.includes("never saved")) failures.push(`${name}: reasoning text reached the saved file`);
+  }
+
+  // A fullscreen session: the real TUI controller with a fake terminal and provider, streamed and not streamed.
+  const fullscreen = join(scratch, "session-fullscreen");
+  const tuiText = 'tui \u001b[31m "q" \\ \u{1F600} é';
+  const tuiProvider = fakeProvider("ollama", [{ kind: "completed", result: { text: "plain answer", usage: { inputTokens: 7n, outputTokens: 2n } } }], [
+    [
+      { kind: "reasoning", text: "never saved" },
+      ...Array.from(tuiText).map((piece) => ({ kind: "text", text: piece })),
+      { kind: "completed", result: { text: tuiText, usage: { inputTokens: big, outputTokens: 0n }, serviceTier: "" } },
+    ],
+    [
+      { kind: "text", text: "part" },
+      { kind: "incomplete", reason: "limit", partialText: "part", usage: { outputTokens: 9007199254740993n } },
+    ],
+  ]);
+  const codeFullscreen = await runFullscreen(main, fullscreen, ["--stream", "--provider", "ollama", "--model", "hf.co/org/model:Q4_K_M"], [
+    ['t1 "x" \u{1F600}\r', "DONE"],
+    ["t2\r", "WARNING | Response incomplete"],
+    ["/exit\r", undefined],
+  ], tuiProvider);
+  if (codeFullscreen !== 0) failures.push(`TS fullscreen session exited ${String(codeFullscreen)}`);
+  collect(fullscreen, "fullscreen");
+  const plainFullscreen = join(scratch, "session-fullscreen-plain");
+  const codePlain = await runFullscreen(main, plainFullscreen, ["--provider", "ollama", "--model", "hf.co/org/model:Q4_K_M"], [
+    ["p1\r", "DONE"],
+    ["\u0004", undefined],
+  ], fakeProvider("ollama", [{ kind: "completed", result: { text: "plain answer", usage: { inputTokens: 7n, outputTokens: 2n } } }]));
+  if (codePlain !== 0) failures.push(`TS fullscreen (non-streaming) session exited ${String(codePlain)}`);
+  collect(plainFullscreen, "fullscreen_plain");
+  for (const [name, bytes] of files) {
+    if (name.includes("_fullscreen_") && bytes.includes("never saved")) failures.push(`${name}: reasoning text reached the saved file`);
+  }
+  const savedFullscreen = [...files].find(([name]) => name.startsWith("conversation_fullscreen_"));
+  if (savedFullscreen === undefined || codecs.decodeConversation(savedFullscreen[1]).messages[1]?.content !== tuiText) {
+    failures.push("fullscreen: the streamed answer was not saved byte for byte");
   }
 
   // A Python-written conversation continued by TS: context sent, prior records kept exactly.

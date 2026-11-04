@@ -35,6 +35,10 @@ export interface ChatInvocation {
   readonly usage: boolean;
   readonly stream: boolean;
   readonly noHistory: boolean;
+  /** `--plain`: never use the fullscreen interface. */
+  readonly plain: boolean;
+  /** `--transcript-on-exit`: after the fullscreen interface is restored, print the committed conversation. */
+  readonly transcriptOnExit: boolean;
 }
 
 export type ParsedArgs =
@@ -44,11 +48,8 @@ export type ParsedArgs =
   | { readonly kind: "chat"; readonly invocation: ChatInvocation }
   | { readonly kind: "error"; readonly message: string };
 
-/** Options of the Python/Go editions that this build deliberately rejects. */
-const FUTURE_OPTIONS: ReadonlySet<string> = new Set(["transcript-on-exit"]);
-
 /** Switches that only make sense for the interactive chat. */
-const CHAT_SWITCHES: ReadonlySet<string> = new Set(["plain", "no-history"]);
+const CHAT_SWITCHES: ReadonlySet<string> = new Set(["plain", "no-history", "transcript-on-exit"]);
 
 const VALUE_OPTIONS = ["provider", "model", "reasoning-effort", "max-output-tokens", "answer-style"] as const;
 type ValueOption = (typeof VALUE_OPTIONS)[number];
@@ -60,6 +61,7 @@ const OPTIONS = {
   stream: { type: "boolean" },
   plain: { type: "boolean" },
   "no-history": { type: "boolean" },
+  "transcript-on-exit": { type: "boolean" },
   provider: { type: "string" },
   model: { type: "string" },
   "reasoning-effort": { type: "string" },
@@ -93,7 +95,6 @@ export function parseCliArgs(argv: readonly string[]): ParsedArgs {
   const values = new Map<ValueOption, string>();
   const valued: string[] = [];
   const problems: string[] = [];
-  const future: string[] = [];
   const unknown: string[] = [];
   const positionals: string[] = [];
 
@@ -126,8 +127,6 @@ export function parseCliArgs(argv: readonly string[]): ParsedArgs {
         } else {
           values.set(name, token.value);
         }
-      } else if (FUTURE_OPTIONS.has(name)) {
-        future.push(rawName);
       } else {
         unknown.push(rawName);
       }
@@ -144,17 +143,13 @@ export function parseCliArgs(argv: readonly string[]): ParsedArgs {
   }
   const hasGenerationOptions = usage || stream || values.size > 0;
   const hasOtherArguments =
-    future.length > 0 || unknown.length > 0 || positionals.length > 0 || hasGenerationOptions || chatSwitches.size > 0;
+    unknown.length > 0 || positionals.length > 0 || hasGenerationOptions || chatSwitches.size > 0;
   if ((help || version) && hasOtherArguments) {
     const switchName = help ? "--help" : "--version";
     return fail(`invalid invocation: ${switchName} cannot be combined with other arguments`);
   }
   if (help && version) {
     return fail("conflicting options: --help and --version cannot be used together");
-  }
-  const [firstFuture] = future;
-  if (firstFuture !== undefined) {
-    return fail(`unsupported option ${quote(firstFuture)}: not implemented yet`);
   }
   const [firstUnknown] = unknown;
   if (firstUnknown !== undefined) {
@@ -189,6 +184,8 @@ export function parseCliArgs(argv: readonly string[]): ParsedArgs {
         usage,
         stream,
         noHistory: chatSwitches.has("no-history"),
+        plain: chatSwitches.has("plain"),
+        transcriptOnExit: chatSwitches.has("transcript-on-exit"),
       },
     };
   }

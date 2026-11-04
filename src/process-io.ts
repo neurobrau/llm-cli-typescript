@@ -1,6 +1,7 @@
 import type { Writable } from "node:stream";
 
 import type { InterruptSource, Writer } from "./io.js";
+import type { SignalSource, TerminationSignal } from "./tui/terminal.js";
 
 /**
  * Wraps a stream so each write resolves when the chunk is flushed and rejects
@@ -41,6 +42,25 @@ export const sigintSource: InterruptSource = {
     process.on("SIGINT", onInterrupt);
     return () => {
       process.removeListener("SIGINT", onInterrupt);
+    };
+  },
+};
+
+const FULLSCREEN_SIGNALS: readonly TerminationSignal[] = ["SIGINT", "SIGTERM", "SIGHUP"];
+
+/**
+ * One listener per signal, registered only while the fullscreen interface
+ * runs; afterwards the default OS behavior returns.
+ */
+export const processSignals: SignalSource = {
+  register(onSignal) {
+    const listeners = FULLSCREEN_SIGNALS.map((signal) => {
+      const listener = (): void => { onSignal(signal); };
+      process.on(signal, listener);
+      return [signal, listener] as const;
+    });
+    return () => {
+      for (const [signal, listener] of listeners) process.removeListener(signal, listener);
     };
   },
 };

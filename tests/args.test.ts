@@ -4,6 +4,8 @@ import { describe, it } from "node:test";
 import { parseCliArgs } from "../src/args.js";
 import type { PromptInvocation } from "../src/args.js";
 
+const CHAT_DEFAULTS = { usage: false, stream: false, noHistory: false, plain: false, transcriptOnExit: false };
+
 function errorMessage(argv: readonly string[]): string {
   const parsed = parseCliArgs(argv);
   if (parsed.kind !== "error") {
@@ -22,8 +24,8 @@ function invocation(argv: readonly string[]): PromptInvocation {
 
 void describe("parseCliArgs: help and version", () => {
   void it("starts the chat, not help, without arguments and for bare --", () => {
-    assert.deepEqual(parseCliArgs([]), { kind: "chat", invocation: { usage: false, stream: false, noHistory: false } });
-    assert.deepEqual(parseCliArgs(["--"]), { kind: "chat", invocation: { usage: false, stream: false, noHistory: false } });
+    assert.deepEqual(parseCliArgs([]), { kind: "chat", invocation: CHAT_DEFAULTS });
+    assert.deepEqual(parseCliArgs(["--"]), { kind: "chat", invocation: CHAT_DEFAULTS });
   });
 
   void it("accepts --help, -h and --version", () => {
@@ -70,10 +72,10 @@ void describe("parseCliArgs: unsupported and unknown options", () => {
     assert.match(errorMessage(["-x"]), /unknown option "-x"/);
   });
 
-  void it("rejects future options explicitly, before looking at values", () => {
-    for (const argv of [["--transcript-on-exit", "p"], ["--transcript-on-exit"]]) {
-      assert.match(errorMessage(argv), /unsupported option/, JSON.stringify(argv));
-    }
+  void it("--transcript-on-exit is a chat-only switch: rejected with a prompt, accepted without", () => {
+    assert.match(errorMessage(["--transcript-on-exit", "p"]), /cannot be used with a prompt/);
+    assert.match(errorMessage(["--transcript-on-exit=1"]), /does not take a value/);
+    assert.deepEqual(parseCliArgs(["--transcript-on-exit"]), { kind: "chat", invocation: { ...CHAT_DEFAULTS, transcriptOnExit: true } });
   });
 
   void it("keeps control characters out of diagnostics", () => {

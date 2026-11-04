@@ -3,6 +3,9 @@ import type { PromptInvocation } from "./args.js";
 import { resolveSettings } from "./application/resolve-settings.js";
 import type { HistoryPort, SettingsPort } from "./application/chat-startup.js";
 import { runChat } from "./chat/run-chat.js";
+import { selectChatMode } from "./tui/eligibility.js";
+import { runTui } from "./tui/run-tui.js";
+import type { TuiHost } from "./tui/terminal.js";
 import { EXIT_CANCELLED, ProviderError, SettingsError, exitCodeForKind, isAbortError } from "./domain/errors.js";
 import type { GenerationRequest, ProviderId } from "./domain/generation.js";
 import type { Provider } from "./domain/provider.js";
@@ -56,6 +59,11 @@ export interface RunDependencies {
   /** Stores are built only from paths resolved out of `storageEnvironment`. Defaults: the filesystem stores. */
   readonly createHistoryStore?: (conversationsDirectory: string) => HistoryPort;
   readonly createSettingsStore?: (path: string) => SettingsPort;
+  /**
+   * The terminal for the fullscreen chat. Absent (the default): the fullscreen
+   * interface is never used and no terminal is ever inspected or changed.
+   */
+  readonly tui?: TuiHost;
 }
 
 const DEFAULT_CLEANUP_TIMEOUT_MS = 2000;
@@ -86,20 +94,31 @@ async function execute(argv: readonly string[], io: Io, deps: RunDependencies): 
       return EXIT_USAGE;
     case "prompt":
       return runPrompt(parsed.invocation, io, deps);
-    case "chat":
-      return runChat(parsed.invocation, io, {
-        title: `${EDITION_TITLE} ${readPackageVersion()}`,
-        interrupt: deps.interrupt,
-        cleanupTimeoutMs: deps.cleanupTimeoutMs ?? DEFAULT_CLEANUP_TIMEOUT_MS,
-        createInput: deps.createInput ?? (() => EMPTY_INPUT),
+    case "chat": {
+      const title = `${EDITION_TITLE} ${readPackageVersion()}`;
+      const cleanupTimeoutMs = deps.cleanupTimeoutMs ?? DEFAULT_CLEANUP_TIMEOUT_MS;
+      const startup = {
         environment: deps.storageEnvironment ?? { env: {} },
         clock: deps.clock ?? (() => new Date()),
         newId: deps.newId ?? newConversationId,
         createProvider: deps.createProvider ?? defaultProvider,
         checkProviderReady: deps.checkProviderReady,
-        createHistoryStore: deps.createHistoryStore ?? ((directory) => new HistoryStore(directory)),
-        createSettingsStore: deps.createSettingsStore ?? ((path) => new SettingsStore(path)),
+        createHistoryStore: deps.createHistoryStore ?? ((directory: string) => new HistoryStore(directory)),
+        createSettingsStore: deps.createSettingsStore ?? ((path: string) => new SettingsStore(path)),
+      };
+      // The terminal is inspected only here, for a chat invocation, and only through the injected host.
+      const terminalEnvironment = parsed.invocation.plain ? undefined : deps.tui?.environment();
+      if (deps.tui !== undefined && terminalEnvironment !== undefined && selectChatMode(terminalEnvironment, false) === "fullscreen") {
+        return runTui(parsed.invocation, io, { ...startup, title, cleanupTimeoutMs, host: deps.tui, terminalEnvironment });
+      }
+      return runChat(parsed.invocation, io, {
+        ...startup,
+        title,
+        interrupt: deps.interrupt,
+        cleanupTimeoutMs,
+        createInput: deps.createInput ?? (() => EMPTY_INPUT),
       });
+    }
   }
 }
 

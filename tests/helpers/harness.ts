@@ -8,10 +8,12 @@ import { homedir } from "node:os";
 
 import { LineReader } from "../../src/line-input.js";
 import { run } from "../../src/main.js";
-import { createWriter, sigintSource } from "../../src/process-io.js";
+import { createWriter, processSignals, sigintSource } from "../../src/process-io.js";
 import { OpenAIProvider } from "../../src/providers/openai/provider.js";
 import { createOpenAiApi } from "../../src/providers/openai/sdk.js";
 import { OllamaProvider } from "../../src/providers/ollama/provider.js";
+import { AnsiTerminal } from "../../src/tui/ansi-terminal.js";
+import { systemTimers } from "../../src/tui/terminal.js";
 import { KEY } from "./openai.js";
 
 const [baseURL, ...cliArgs] = process.argv.slice(2);
@@ -37,5 +39,17 @@ process.exitCode = await run(
     interrupt: sigintSource,
     storageEnvironment: { env: process.env, home: homedir() },
     createInput: () => new LineReader(process.stdin),
+    tui: {
+      environment: () => ({
+        stdinIsTTY: process.stdin.isTTY,
+        stdoutIsTTY: process.stdout.isTTY,
+        term: process.env.TERM,
+        rawModeSupported: typeof process.stdin.setRawMode === "function",
+        color: (process.env.NO_COLOR ?? "") === "",
+      }),
+      createTerminal: (environment) => new AnsiTerminal({ input: process.stdin, output: process.stdout, color: environment.color }),
+      signals: processSignals,
+      timers: systemTimers,
+    },
   },
 );

@@ -58,6 +58,8 @@ export async function consumeStream(
   parent: AbortSignal,
   onText: (text: string) => Promise<void>,
   cleanupMs: number,
+  /** Told only *that* the model is thinking, never what; failures count as output failures like `onText`. */
+  onReasoning?: () => void,
 ): Promise<StreamConsumption> {
   const own = new AbortController();
   const abortOwn = (): void => {
@@ -138,6 +140,13 @@ export async function consumeStream(
       const event = result.value;
       if (isTerminalEvent(event)) {
         return await concluded({ kind: "terminal", event });
+      }
+      if (event.kind === "reasoning" && onReasoning !== undefined) {
+        try {
+          onReasoning();
+        } catch (error: unknown) {
+          return await concluded({ kind: "output-error", error });
+        }
       }
       if (event.kind === "text" && event.text !== "") {
         try {

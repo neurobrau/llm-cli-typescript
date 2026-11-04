@@ -241,3 +241,41 @@ void describe("a stream that cannot be closed after its terminal event", () => {
     assert.equal(history.calls.filter((call) => call === "save").length, 1);
   });
 });
+
+void describe("consumeStream reasoning observer (fullscreen status)", () => {
+  void it("is told that the model is thinking - never what - and the text path is unchanged", async () => {
+    const seen: string[] = [];
+    const events: StreamEvent[] = [{ kind: "reasoning", text: "SECRET" }, text("a"), { kind: "reasoning", text: "MORE" }, completedEvent("a")];
+    const calls = { ret: 0 };
+    const open = (): AsyncIterable<StreamEvent> => ({
+      [Symbol.asyncIterator]: (): AsyncIterator<StreamEvent> => ({
+        next: () => {
+          const event = events.shift();
+          return Promise.resolve(event === undefined ? { done: true, value: undefined } : { done: false, value: event });
+        },
+        return: () => {
+          calls.ret += 1;
+          return Promise.resolve({ done: true, value: undefined });
+        },
+      }),
+    });
+    const delivered: string[] = [];
+    const result = await consumeStream(open, new AbortController().signal, (t) => { delivered.push(t); return Promise.resolve(); }, 20, (...args: unknown[]) => {
+      seen.push(`reasoning(${String(args.length)} args)`);
+    });
+    assert.equal(result.end.kind, "terminal");
+    assert.deepEqual(seen, ["reasoning(0 args)", "reasoning(0 args)"]);
+    assert.deepEqual(delivered, ["a"]);
+    assert.equal(result.text, "a");
+    assert.equal(calls.ret, 1);
+  });
+
+  void it("an observer that throws is an output failure: the stream is aborted and closed exactly once", async () => {
+    const stream = hanging([{ kind: "reasoning", text: "x" }, completedEvent("a")]);
+    const failure = new Error("observer failed");
+    const result = await consumeStream(stream.iterable, new AbortController().signal, () => Promise.resolve(), 20, () => { throw failure; });
+    assert.ok(result.end.kind === "output-error" || result.end.kind === "unclosed");
+    assert.equal(stream.calls.ret, 1);
+    assert.equal(stream.calls.aborted, true);
+  });
+});
