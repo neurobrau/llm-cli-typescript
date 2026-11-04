@@ -2,14 +2,14 @@
 
 ## Current scope and limitations
 
-`0.2.0-dev` (the completed `0.1.0` CLI Foundation behavior is unchanged) implements `-h`/`--help`, `--version`, a one-shot prompt for OpenAI and Ollama (`--provider openai|ollama`), the plain chat (`--plain`, `--no-history`) with persistent history and read-only saved settings, and `--stream` for both (Task 007). Not implemented: pricing and cost estimates, provider/model switching, model-discovery commands, terminal UI, `--transcript-on-exit`. Exit codes 1-8, 130 and 141 are produced for the one-shot path.
+`0.2.0` (the completed `0.1.0` CLI Foundation behavior is unchanged) implements `-h`/`--help`, `--version`, a one-shot prompt for OpenAI and Ollama (`--provider openai|ollama`), the plain chat (`--plain`, `--no-history`) with persistent history and read-only saved settings, and `--stream` for both (Task 007). Not implemented: pricing and cost estimates, provider/model switching, model-discovery commands, terminal UI, `--transcript-on-exit`. Exit codes 1-8, 130 and 141 are produced for the one-shot path.
 
 ## References
 
 - Python (primary behavior reference): `0a6d045c022b850371a1c51a1df30f11d9d4c60e`
 - Go: `b064decc66cad7d9656488bdf7749650b52cf309`
 
-Both are read-only. The Go version constant (`0.4.0-dev`) and the Python version are independent of this edition's `0.2.0-dev` (version plan in `docs/architecture.md`).
+Both are read-only. The Go version constant (`0.4.0-dev`) and the Python version are independent of this edition's `0.2.0` (version plan in `docs/architecture.md`).
 
 ## Settings resolution (Task 002, internal)
 

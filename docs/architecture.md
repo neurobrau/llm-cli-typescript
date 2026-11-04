@@ -1,6 +1,6 @@
 # Architecture
 
-Status: `0.2.0-dev` (milestone 0.2 in progress). The completed CLI Foundation (`0.1.0`: non-streaming OpenAI and Ollama one-shot) is behavior-preserved; the plain chat with persistent history and read-only saved settings is connected (Task 006) and `--stream` is implemented for both providers and both front ends (Task 007). No tag or release has been created or published.
+Status: `0.2.0` (milestone 0.2 completed after the owner smoke tests). The completed CLI Foundation (`0.1.0`: non-streaming OpenAI and Ollama one-shot) is behavior-preserved; the plain chat with persistent history and read-only saved settings is connected (Task 006) and `--stream` is implemented for both providers and both front ends (Task 007). No tag or release has been created or published.
 
 ## CLI composition
 
@@ -155,8 +155,8 @@ Layers (dependencies point downward; nothing below knows the layers above):
 | Stage | Version |
 | --- | --- |
 | Completed CLI Foundation (OpenAI + Ollama non-streaming) | 0.1.0 (done) |
-| Work on chat/history/streaming | 0.2.0-dev (current) |
-| Completed interactive chat milestone | 0.2.0 |
+| Work on chat/history/streaming | 0.2.0-dev (done) |
+| Completed interactive chat milestone | 0.2.0 (current) |
 | TUI development / completed TUI | 0.3.0-dev / 0.3.0 |
 | Full parity development / completed milestone | 0.4.0-dev / 0.4.0 |
 

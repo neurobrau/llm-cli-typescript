@@ -1,6 +1,6 @@
 # NeuroBräu TypeScript
 
-TypeScript edition of the NeuroBräu LLM CLI. The current version is `0.2.0-dev` (work toward the interactive chat milestone); the completed CLI Foundation milestone was `0.1.0`. It can send **one one-shot prompt** to **OpenAI** (Responses API, official `openai` SDK 7.45.0) or to a **local Ollama server** (native HTTP API, no extra dependency) and print the answer, and, without a prompt, it runs a **line-oriented chat** (`YOU >` / `AI >`) on the same providers that restores and saves conversations, applies saved settings and understands `/help`, `/reset`, `/cleanup`, `/usage` and `/exit`. With `--stream` the answer is printed as it arrives, in both modes (real incremental streaming from OpenAI Responses and native Ollama). There is no pricing or cost estimate, provider/model switching, or fullscreen TUI yet. Conversation, `active.json`, settings and usage-record JSON follow the Python reference formats (`docs/storage.md`). No Git tag or release exists for any version.
+TypeScript edition of the NeuroBräu LLM CLI. The current version is `0.2.0` (the completed interactive chat, history and streaming milestone); the earlier completed CLI Foundation milestone was `0.1.0`. It can send **one one-shot prompt** to **OpenAI** (Responses API, official `openai` SDK 7.45.0) or to a **local Ollama server** (native HTTP API, no extra dependency) and print the answer, and, without a prompt, it runs a **line-oriented chat** (`YOU >` / `AI >`) on the same providers that restores and saves conversations, applies saved settings and understands `/help`, `/reset`, `/cleanup`, `/usage` and `/exit`. With `--stream` the answer is printed as it arrives, in both modes (real incremental streaming from OpenAI Responses and native Ollama). There is no pricing or cost estimate, provider/model switching, or fullscreen TUI yet. Conversation, `active.json`, settings and usage-record JSON follow the Python reference formats (`docs/storage.md`). No Git tag or release exists for any version.
 
 ## Prerequisites
 
@@ -21,7 +21,7 @@ npm run build
 ```sh
 node dist/cli.js                    # plain chat (continues the last conversation)
 node dist/cli.js --help             # or -h
-node dist/cli.js --version          # NeuroBräu TypeScript CLI 0.2.0-dev
+node dist/cli.js --version          # NeuroBräu TypeScript CLI 0.2.0
 export OPENAI_API_KEY=...           # read only when a prompt is sent
 node dist/cli.js "What is a neural network?"
 node dist/cli.js --provider ollama "What is a neural network?"   # first local model, no key
@@ -182,7 +182,7 @@ Tests include unit tests, runner tests with injected writers, and integration te
 
 ## Planned milestones
 
-Pricing and cost estimates, provider/model switching and a terminal UI come in later tasks (OpenAI and Ollama one-shot, the plain chat with history and `--stream` are done). Version plan: `0.1.0` completed CLI Foundation; `0.2.0-dev` while working on chat/history/streaming, `0.2.0` when that milestone is complete; `0.3.0-dev`/`0.3.0` for the TUI; `0.4.0-dev`/`0.4.0` for full parity. See `docs/architecture.md` and `docs/parity.md`.
+Pricing and cost estimates, provider/model switching and a terminal UI come in later tasks (OpenAI and Ollama one-shot, the plain chat with history and `--stream` are done). Version plan: `0.1.0` completed CLI Foundation; `0.2.0` completed chat/history/streaming (current); `0.3.0-dev`/`0.3.0` for the TUI; `0.4.0-dev`/`0.4.0` for full parity. See `docs/architecture.md` and `docs/parity.md`.
 
 ## Working documents
 
