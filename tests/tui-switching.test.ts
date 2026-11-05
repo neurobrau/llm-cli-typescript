@@ -9,7 +9,7 @@ import { HistoryStore } from "../src/storage/fs/history-store.js";
 import { SettingsStore } from "../src/storage/fs/settings-store.js";
 import { MemoryHistory, answer } from "./helpers/chat.js";
 import { deferred } from "./helpers/deferred.js";
-import { CatalogProvider, startMenuTui } from "./helpers/menus.js";
+import { CatalogProvider, model, startMenuTui } from "./helpers/menus.js";
 import type { MenuRig } from "./helpers/menus.js";
 import { makeTree, without } from "./helpers/storage-fs.js";
 import type { Tree } from "./helpers/storage-fs.js";
@@ -366,4 +366,123 @@ void describe("settings location problems", () => {
 void it("catalog providers keep the label of the real adapters", () => {
   assert.equal(new CatalogProvider("openai", []).label, "OpenAI");
   assert.equal(new CatalogProvider("ollama", []).label, "Ollama");
+});
+
+// A conversation file without provider/model matches any model of OpenAI; once a selection of this run adopted it,
+// no other selection may adopt it too (they would share an id and overwrite each other's exchanges).
+void describe("adopting a legacy (model-less) conversation file", () => {
+  const legacyFile = (): StoredConversation =>
+    without(stored(ID_L, "unused", "2026-10-21T08:00:00.000Z", ["legacy q", "legacy a"], 5n), "provider", "model");
+
+  const openaiModels = ({ openai }: { openai: MenuRig["openai"] }): void => {
+    openai.models = [model("model-a"), model("model-b")];
+  };
+  const argvA = ["--provider", "openai", "--model", "model-a"];
+
+  async function chooseOpenAi(rig: MenuRig, index: number, name: string): Promise<void> {
+    await press(rig, KEYS.f2);
+    await until(() => term(rig).text().includes("SELECT OPENAI MODEL"), "menu");
+    await press(rig, KEYS.home);
+    for (let i = 0; i < index; i += 1) await press(rig, KEYS.down);
+    await press(rig, KEYS.enter);
+    await until(() => term(rig).flat().includes(`Now using OpenAI / ${name}.`), `switch to ${name}`);
+  }
+
+  /** Types a line and presses Enter until `started()`: Enter is refused while a switch's storage writes settle. */
+  async function send(rig: MenuRig, line: string, started: () => boolean): Promise<void> {
+    await rig.session.type(line);
+    for (let i = 0; i < 300 && !started(); i += 1) {
+      await press(rig, KEYS.enter);
+      if (!started()) await new Promise<void>((resolve) => { setTimeout(resolve, 10); });
+    }
+    assert.ok(started(), `"${line}" was sent`);
+    rig.session.timers.advance(2100); // the refusals' warning flash ends, so the DONE status shows
+  }
+
+  const files = async (): Promise<string[]> => (await readdir(tree.conversations)).sort();
+  const load = async (name: string) => decodeConversation(await readFile(join(tree.conversations, name)));
+
+  void it("A -> B -> A keeps distinct ids and files, independent contexts and usage; a restart restores both exchanges", async () => {
+    await mkdir(tree.conversations, { recursive: true, mode: 0o700 });
+    const original = encodeConversation(legacyFile());
+    await writeFile(join(tree.conversations, `${ID_L}.json`), original, { mode: 0o600 });
+
+    const rig = await startMenuTui({ tree, deps: fsDeps, argv: argvA, configure: (p) => { openaiModels(p); p.openai.push(answer("answer b", { inputTokens: 7n }), answer("answer a", { inputTokens: 11n })); } });
+    assert.ok(term(rig).flat().includes("YOU > legacy q"), "startup adopted the legacy file as model-a");
+
+    // B before A rewrote the file: B must not inherit it
+    await chooseOpenAi(rig, 1, "model-b");
+    assert.ok(term(rig).flat().includes("Started a new conversation"), term(rig).flat());
+    assert.ok(!term(rig).flat().includes("legacy q"));
+    assert.equal(await readFile(join(tree.conversations, `${ID_L}.json`), "utf8"), original, "the legacy file was not rewritten to claim it");
+    await send(rig, "qb", () => rig.openai.calls === 1);
+    await until(() => term(rig).status().startsWith("DONE"), `B answered (status: ${term(rig).status()}; ${term(rig).flat().slice(-300)})`);
+    assert.deepEqual(rig.openai.sent(0), ["user: qb"], "no context of A");
+
+    await chooseOpenAi(rig, 0, "model-a");
+    assert.ok(term(rig).flat().includes("legacy q"), "A is back from memory");
+    await send(rig, "qa2", () => rig.openai.calls === 2);
+    await until(() => term(rig).status().startsWith("DONE"), "A answered");
+    assert.deepEqual(rig.openai.sent(1), ["user: legacy q", "assistant: legacy a", "user: qa2"], "no context of B");
+    assert.equal(await quit(rig), 0);
+
+    const names = await files();
+    assert.equal(names.length, 2, "two files, none overwritten");
+    const [a, b] = await Promise.all([load(`${ID_L}.json`), load(names.find((n) => n !== `${ID_L}.json`) ?? "")]);
+    assert.deepEqual([a.provider, a.model, a.messages.map((m) => m.content)], ["openai", "model-a", ["legacy q", "legacy a", "qa2", "answer a"]]);
+    assert.deepEqual([b.provider, b.model, b.messages.map((m) => m.content)], ["openai", "model-b", ["qb", "answer b"]]);
+    assert.notEqual(a.id, b.id);
+    assert.deepEqual(a.requests.map((q) => q.usage.inputTokens), [5n, 11n]);
+    assert.deepEqual(b.requests.map((q) => q.usage.inputTokens), [7n]);
+
+    // restart: both exchanges come back correctly
+    const again = await startMenuTui({ tree, deps: fsDeps, argv: argvA, configure: (p) => { openaiModels(p); p.openai.push(answer("later b")); } });
+    assert.ok(term(again).flat().includes("YOU > qa2") && term(again).flat().includes("AI > answer a"));
+    await chooseOpenAi(again, 1, "model-b");
+    assert.ok(term(again).flat().includes("Restored its conversation (2 messages)."));
+    assert.ok(term(again).flat().includes("YOU > qb") && !term(again).flat().includes("qa2"));
+    await send(again, "qb2", () => again.openai.calls === 1);
+    assert.deepEqual(again.openai.sent(0), ["user: qb", "assistant: answer b", "user: qb2"]);
+    assert.equal(await quit(again), 0);
+  });
+
+  void it("B receives another eligible unclaimed file, never the one A adopted", async () => {
+    await mkdir(tree.conversations, { recursive: true, mode: 0o700 });
+    const other = without(stored("33333333-3333-4333-8333-333333333333", "unused", "2026-10-21T07:00:00.000Z", ["other q", "other a"]), "provider", "model");
+    await writeFile(join(tree.conversations, `${ID_L}.json`), encodeConversation(legacyFile()), { mode: 0o600 });
+    await writeFile(join(tree.conversations, `${other.id}.json`), encodeConversation(other), { mode: 0o600 });
+    const rig = await startMenuTui({ tree, deps: fsDeps, argv: argvA, configure: openaiModels });
+    assert.ok(term(rig).flat().includes("legacy q"), "the newest file went to the startup selection");
+    await chooseOpenAi(rig, 1, "model-b");
+    assert.ok(term(rig).flat().includes("Restored its conversation (2 messages)."));
+    assert.ok(term(rig).flat().includes("YOU > other q") && !term(rig).flat().includes("legacy q"));
+    assert.equal(await quit(rig), 0);
+  });
+
+  void it("a cancelled preparation claims nothing and writes nothing", async () => {
+    await mkdir(tree.conversations, { recursive: true, mode: 0o700 });
+    const original = encodeConversation(legacyFile());
+    await writeFile(join(tree.conversations, `${ID_L}.json`), original, { mode: 0o600 });
+    const gate = deferred();
+    const rig = await startMenuTui({ tree, deps: fsDeps, configure: ({ openai }) => { openai.gates.capabilities = gate.promise; } });
+    assert.ok(!term(rig).flat().includes("legacy q"), "Ollama does not adopt a legacy (OpenAI) file");
+    await press(rig, KEYS.f3);
+    await press(rig, KEYS.up);
+    await press(rig, KEYS.enter);
+    await until(() => rig.openai.capabilityCalls.length === 1, "preparation running");
+    await press(rig, KEYS.ctrlC);
+    await until(() => term(rig).status() === "CANCELLED", "cancelled");
+    gate.resolve();
+    await settleAll(10);
+    assert.deepEqual(await files(), [`${ID_L}.json`], "nothing was written");
+    assert.equal(await readFile(join(tree.conversations, `${ID_L}.json`), "utf8"), original);
+    await assert.rejects(readFile(join(tree.app, "active.json")), /ENOENT/u);
+    // a later, completed switch can still adopt the unclaimed file
+    await press(rig, KEYS.f3);
+    await press(rig, KEYS.up);
+    await press(rig, KEYS.enter);
+    await until(() => term(rig).flat().includes("Now using OpenAI / gpt-6-luna. Restored its conversation (2 messages)."), "adopted");
+    assert.equal(await readFile(join(tree.conversations, `${ID_L}.json`), "utf8"), original, "adopting does not rewrite it");
+    assert.equal(await quit(rig), 0);
+  });
 });

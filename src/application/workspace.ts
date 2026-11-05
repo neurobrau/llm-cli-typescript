@@ -97,6 +97,12 @@ export class Workspace {
   private readonly newId: () => string;
   private readonly tracker: ActiveTracker;
   private readonly sessions = new Map<string, ChatSession>();
+  /**
+   * Conversation ids adopted in this run -> the selection that owns them. A claim outlives a `/reset` (the
+   * archived file stays that selection's) and is dropped only by a confirmed cleanup. It keeps a legacy
+   * file (no provider/model, which matches any model) from being adopted by two selections at once.
+   */
+  private readonly claims = new Map<string, string>();
   private active: ChatSession;
   private activeProvider: Provider;
   private resolved: ResolvedSettings;
@@ -113,6 +119,7 @@ export class Workspace {
     this.activeProvider = options.provider;
     this.resolved = options.settings;
     this.sessions.set(selectionKey(options.session.selection), options.session);
+    this.claim(options.session);
   }
 
   get session(): ChatSession {
@@ -173,7 +180,11 @@ export class Workspace {
     let source: SwitchSource = parked === undefined ? { kind: "new" } : { kind: "parked", session: parked };
     let warnings: readonly string[] = [];
     if (parked === undefined && this.history !== undefined) {
-      const latest = await this.history.loadLatest((conversation) => matchesSelection(conversation, selection));
+      const key = selectionKey(selection);
+      // Files adopted by another selection of this run are not eligible; unclaimed legacy files still match.
+      const latest = await this.history.loadLatest(
+        (conversation) => matchesSelection(conversation, selection) && (this.claims.get(conversation.id) ?? key) === key,
+      );
       ensureNotAborted(signal);
       warnings = latest.warnings;
       if (latest.conversation !== undefined) source = { kind: "restored", conversation: latest.conversation };
@@ -207,6 +218,7 @@ export class Workspace {
             ...(source.kind === "restored" ? { restored: source.conversation } : {}),
           });
     this.sessions.set(selectionKey(prepared.selection), session);
+    this.claim(session);
     this.active = session;
     this.activeProvider = prepared.provider;
     this.resolved = prepared.settings;
@@ -232,6 +244,13 @@ export class Workspace {
     for (const [key, session] of [...this.sessions]) {
       if (session !== this.active) this.sessions.delete(key);
     }
+    this.claims.clear(); // the files are gone
+    this.claim(this.active);
+  }
+
+  /** Reserves the session's current conversation id for its selection (the claim is only memory; no file is touched). */
+  private claim(session: ChatSession): void {
+    this.claims.set(session.snapshot().id, selectionKey(session.selection));
   }
 
   // ----- settings of the current selection -----
