@@ -8,6 +8,7 @@ import { InputEditor } from "./editor.js";
 import { computeLayout } from "./layout.js";
 import type { Size } from "./layout.js";
 import type { PanelStats } from "./panel.js";
+import type { Menu } from "./menu.js";
 import { READY, isTransient } from "./status.js";
 import type { RuntimeStatus } from "./status.js";
 import { expandTabs, neutralize, splitLines, wrapParagraph } from "./text.js";
@@ -16,6 +17,15 @@ export type EntryKind = "user" | "ai" | "info" | "error";
 
 export const USER_LABEL = "YOU > ";
 export const AI_LABEL = "AI > ";
+export const TOKENS_LABEL = "TOKENS > ";
+
+/** The custom max-output-tokens prompt: the draft it set aside, restored when it closes. */
+export interface TokenPrompt {
+  readonly model: string;
+  readonly limit: number | undefined;
+  readonly savedText: string;
+  readonly savedCursor: number;
+}
 
 export interface Entry {
   readonly id: number;
@@ -49,6 +59,12 @@ export class TuiModel {
   live: LiveRequest | undefined;
   /** A blocking storage operation (reset, cleanup) is running. */
   working = false;
+  /** The open selection menu (modal), if any. */
+  menu: Menu | undefined;
+  /** The open custom-token prompt (modal), if any. */
+  prompt: TokenPrompt | undefined;
+  /** Label of the running discovery/preparation check, shown as `CONNECTING | <label>`. */
+  checking: string | undefined;
   confirmingCleanup = false;
   stats: PanelStats = { input: undefined, output: undefined, total: undefined, cached: undefined, reasoning: undefined, context: undefined, any: false };
   size: Size;

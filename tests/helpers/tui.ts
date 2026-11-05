@@ -31,7 +31,18 @@ export async function settleAll(turns = 8): Promise<void> {
 export async function until(condition: () => boolean, what = "condition"): Promise<void> {
   for (let i = 0; i < 4000; i += 1) {
     if (condition()) return;
-    await settle();
+    // Macrotask turns first (fast); real file-system work needs a little wall-clock time.
+    if (i < 400) await settle();
+    else await new Promise<void>((resolve) => { setTimeout(resolve, 5); });
+  }
+  throw new Error(`timed out waiting for ${what}`);
+}
+
+/** Like `until` for conditions that need real I/O to finish (file contents). */
+export async function eventually(condition: () => Promise<boolean>, what = "condition"): Promise<void> {
+  for (let i = 0; i < 600; i += 1) {
+    if (await condition()) return;
+    await new Promise<void>((resolve) => { setTimeout(resolve, 5); });
   }
   throw new Error(`timed out waiting for ${what}`);
 }
@@ -359,12 +370,12 @@ export async function startTui(options: TuiOptions = {}): Promise<TuiSession> {
  * timers (drawing, restoring) fire. Fails instead of hanging when the run never ends.
  */
 export async function finishWithClock(session: TuiSession, stepMs = 50, steps = 200): Promise<ChatRun> {
-  let done: ChatRun | undefined;
-  void session.result.then((value) => { done = value; });
-  for (let i = 0; i < steps && done === undefined; i += 1) {
+  const outcome: { value: ChatRun | undefined } = { value: undefined };
+  void session.result.then((value) => { outcome.value = value; });
+  for (let i = 0; i < steps; i += 1) {
+    await settleAll(3); // pending promise work first: a bound must not fire before work that is about to settle
+    if (outcome.value !== undefined) return outcome.value;
     session.timers.advance(stepMs);
-    await settleAll(3);
   }
-  if (done === undefined) throw new Error("run() did not finish although the clock advanced");
-  return done;
+  throw new Error("run() did not finish although the clock advanced");
 }

@@ -2,7 +2,7 @@
 
 ## Current scope and limitations
 
-`0.3.0-dev` (the completed `0.1.0` and `0.2.0` behavior is unchanged) implements `-h`/`--help`, `--version`, a one-shot prompt for OpenAI and Ollama (`--provider openai|ollama`), the chat with persistent history and read-only saved settings in two front ends — the fullscreen DOS-style chat on supported terminals and the line-oriented chat (`--plain`, pipes, other terminals) — `--no-history`, `--transcript-on-exit` (fullscreen only) and `--stream` for both (Tasks 007, 008). **Not implemented:** pricing and cost estimates, the F2–F6 selection menus, provider/model switching and the preference writes they imply (spec sections 4b, 4c, 13 writes, 15), model-discovery commands. Menu and pricing parity is not claimed. Exit codes 1-8, 130 and 141 are produced for the one-shot path.
+`0.3.0-dev` (the completed `0.1.0` and `0.2.0` behavior is unchanged) implements `-h`/`--help`, `--version`, a one-shot prompt for OpenAI and Ollama (`--provider openai|ollama`), the chat with persistent history and read-only saved settings in two front ends — the fullscreen DOS-style chat on supported terminals and the line-oriented chat (`--plain`, pipes, other terminals) — `--no-history`, `--transcript-on-exit` (fullscreen only) and `--stream` for both (Tasks 007, 008). The fullscreen chat also has the F2–F6 menus, provider/model switching with independent conversations and the saved-preference writes (Task 009). **Not implemented:** pricing and cost estimates (spec section 15), model-discovery commands. Pricing parity and release readiness are not claimed. Exit codes 1-8, 130 and 141 are produced for the one-shot path.
 
 ## References
 
@@ -101,7 +101,7 @@ References: Python `docs/tui-spec.md` §12/§14/§15/§16 and the Python/Go stre
 References: Python `docs/tui-spec.md` §1–10, 11, 14, 16 and `ui/tui.py`, `ui/status.py`; Go `internal/tui` (`wrap.go`, `layout.go`, `panel.go`, `app.go`, tests). Only the cases shared with the Go `wrap_test.go` and the Python `test_tui*.py` fixtures read for this task were reused as test data; the rest of the expectations are derived from the spec text.
 
 - **Terminal support** is limited to the tested ANSI/VT families (xterm, screen, tmux, rxvt and variants) on Linux; other `TERM` values use the plain chat. The references use curses/terminfo (Python) and tcell (Go).
-- **No menus**: F2–F6 show a pending-feature warning instead of the menus; the panel headings are the final ones. Provider/model switching, `active.json` updates on switching, saved-setting writes and the `Connecting | Checking …` states are absent. `COST (EST.)` shows `unavailable`.
+- `COST (EST.)` shows `unavailable` (no pricing).
 - **Concurrency**: Node async I/O instead of Python's worker thread and queue; the same observable contract (a bounded, pull-based handoff, 256 events per yield, one request at a time, retired identity on cancel, 0.1 s redraw). Unlike Python's documented limitation, cancellation closes the connection immediately and a new request waits for that close; a provider that does not close within the bound ends the program with exit 130.
 - **`DONE` timing**: the status appears after the exchange was saved (Python: also after the save, but synchronously); during the save Enter is refused with `Please wait; the conversation is being updated`.
 - **Title**: the actual package version and the TypeScript edition name; the `scrolled up N (PgDn)` suffix keeps priority over a long title.
@@ -109,6 +109,19 @@ References: Python `docs/tui-spec.md` §1–10, 11, 14, 16 and `ui/tui.py`, `ui/
 - **Rendering safety**: control characters in model/user/history text are replaced when rendered (Python/Go pass text to curses/tcell, which handle it themselves). `--transcript-on-exit` is a deliberate difference: the spec prints content unchanged, but when stdout is a terminal this edition neutralizes ESC and other unsafe controls in the printed copy (newlines and tabs kept; stored messages untouched), because the text is model output written to the user's real terminal. Non-TTY output stays exact.
 - **EOF / SIGHUP / SIGTERM**: end of terminal input exits 0; SIGHUP 129 and SIGTERM 143 (the spec lists none of these).
 - **Tab expansion** is column-aware (stops of four), like Python's `expandtabs(4)` and Go.
+
+## Menus, switching and preferences differences (Task 009)
+
+References: Python `docs/tui-spec.md` §4b/4c/11/13, `ui/menu.py`, `ui/tui.py` (menus, `switch`), `preferences.py`, `session.py` (`switch`, `Parked`, `cleanup`); Go `internal/tui/{menu,controls,operation}.go` with `menu_test.go` (`TestMenuLine`, `TestStyleMenuLayout`) and `prefs_test.go` (`TestChoicesReplaceCommandLineValues`, `TestUnsupportedSavedValuesOnSwitch`, `TestCorruptSettingsAreNeverOverwritten`, `TestSettingsSaveFailure`). The 39-wide style menu at column 9, row 7, the `menuLine` cases and the notice texts were reused as fixtures.
+
+- **Numeric range**: custom tokens are digits (ASCII only) checked as `bigint`; a value above 9007199254740991 with no smaller known limit is rejected with a TS-specific message (the references use arbitrary Python integers / Go `int`). Saved huge values are kept untouched but cannot be used at runtime, as in the plain chat.
+- **Empty custom input** gets its own message (`Enter a positive whole number.`) instead of the reference's `'' is not …`.
+- **Reasoning current marker** follows explicit provenance (an explicit model default is marked, an unset parameter is not); Python marks the item equal to the effective effort string.
+- **Cancellable checks**: Ctrl+C cancels a running check (`Cancelled.`), later results are ignored, a check that ignores cancellation beyond the bound ends the program with 130; the references run these checks synchronously on the UI thread.
+- **Parked conversations** are kept as whole `ChatSession`s (one per exact selection, JSON-array keys) instead of a tuple-keyed `Parked` record; an empty conversation without a file is not remembered, one with a file is (Python parks only conversations with messages or usage, so after `/reset` → switch → switch back it loads the newest matching file instead; the task requires the post-reset conversation to return).
+- **Switching resolution** is lenient with the resolver's notices; the references apply saved choices through `preferences.apply`.
+- **Settings write** goes through the same store instance as the load; the references construct their store once as well. A failed write keeps the runtime choice and shows `WARNING | Settings not saved` (the reference only shows the warning entry).
+- **Esc** is recognised 25 ms after it arrives and works without breaking split sequences; Go and Python use their terminal libraries' escape delay.
 
 ## Proposed future decisions (not implemented, not yet accepted by the owner)
 

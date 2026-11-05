@@ -5,7 +5,7 @@
  */
 import { REPLACEMENT, codePoints, isUnsafe } from "./text.js";
 
-export type Style = "text" | "border" | "user" | "ai" | "info" | "error" | "waiting";
+export type Style = "text" | "border" | "user" | "ai" | "info" | "error" | "waiting" | "selected";
 
 export const BLANK = " ";
 

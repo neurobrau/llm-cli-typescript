@@ -1,6 +1,6 @@
 # Architecture
 
-Status: `0.3.0-dev` (the fullscreen chat foundation, Task 008, is implemented; the `0.2.0` milestone — plain chat, history, streaming — was completed after the owner smoke tests). The completed CLI Foundation (`0.1.0`: non-streaming OpenAI and Ollama one-shot) is behavior-preserved; the plain chat with persistent history and read-only saved settings is connected (Task 006) and `--stream` is implemented for both providers and both front ends (Task 007). No tag or release has been created or published.
+Status: `0.3.0-dev` (the fullscreen chat foundation, Task 008, and its menus with provider/model switching and saved preferences, Task 009, are implemented; the `0.2.0` milestone — plain chat, history, streaming — was completed after the owner smoke tests). The completed CLI Foundation (`0.1.0`: non-streaming OpenAI and Ollama one-shot) is behavior-preserved; the plain chat with persistent history and read-only saved settings is connected (Task 006) and `--stream` is implemented for both providers and both front ends (Task 007). No tag or release has been created or published.
 
 ## CLI composition
 
@@ -128,7 +128,7 @@ Layers (dependencies point downward; nothing below knows the layers above):
 
 **Request lifecycle.** One request at a time. After the provider call returns, the loop checks `signal.aborted` and applies the commit in the same synchronous step, so a response that lost the race against an interrupt is discarded. Persistence then runs to completion before the answer is printed and before the chat can exit; an interrupt during it only requests the exit (130). After an interrupt the chat waits at most `cleanupTimeoutMs` for the provider to settle; a provider that ignores the abort ends the chat (130), and its late result can reach nothing because the commit happens in the loop. Lines that arrive meanwhile stay in the (paused, bounded) input and are processed in order; EOF never cancels an accepted request.
 
-**Not implemented:** pricing, switching providers/models in a session (and parked conversations), TUI, `--transcript-on-exit`.
+**Not implemented in the plain chat:** switching providers/models in a session (fullscreen only), pricing.
 
 ## Streaming (Task 007)
 
@@ -179,6 +179,18 @@ Details, keys and limits are in `docs/tui.md`. Layers (`src/tui/`):
 | `ansi-terminal.ts` | The production adapter (alternate screen, raw mode, cursor, styles, listeners); constructed explicitly, changes nothing on import, restores exactly what it changed, once. |
 | `eligibility.ts` | The single place that decides fullscreen versus plain. |
 | `run-tui.ts` | Composition: existing startup first, then terminal and controller, exit-code mapping, diagnostics, transcript. |
+
+### Menus, switching and preferences (Task 009)
+
+| Module | Responsibility |
+| --- | --- |
+| `application/provider-hub.ts` | The providers of a run. Only the startup provider exists at first; another is built (after the existing key/readiness check) the first time it is selected, then reused with its discovery caches. No network, no other provider's credentials or host. |
+| `application/workspace.ts` | The current selection and the independent `ChatSession` of every exact provider/model (key: `JSON.stringify([provider, model])`). `prepareSwitch` is asynchronous, cancellable and read-only; `accept` is the synchronous acceptance boundary, after which the storage writes (empty new conversation + `active.json`, or `active.json` only for a remembered/restored one) are awaited and never rolled back. |
+| `application/preferences.ts` | Loaded preferences plus the command-line overrides still in force; resolves with the existing lenient resolver and `savedPreferences`; a confirmed choice clears only its own field's override, updates a copy of the document and saves through the very `SettingsStore` that loaded it (a store disabled at startup stays disabled). |
+| `tui/menu.ts`, `tui/menu-builders.ts`, `tui/token-input.ts` | Pure: menu state/geometry/lines, the five menus' items, bigint-based custom-token validation. |
+| `tui/controller.ts` | Modal key routing, the `checking` phase (a cancellable asynchronous check retired before it is aborted, like a request), applying a prepared switch and confirmed choices. |
+
+`ChatSession` gained `retainable`, `persistActive()` and a shared `ActiveTracker`; `startChat` additionally returns the history access, the settings store instance and the loaded document. The plain chat and one-shot paths never use a saving settings port.
 
 `src/main.ts` receives an optional `tui` host; without it (every default composition and all pre-existing tests) the chat is always the plain chat and no terminal fact is read. `src/cli.ts` supplies the real TTY facts, signal wiring and `AnsiTerminal`. `consumeStream` gained one optional observer that is told *that* reasoning arrived (never its text); its close-once, bounded-cleanup and backpressure behavior is unchanged. `PlainChat` is untouched; the fullscreen chat does not parse printed output of another front end.
 

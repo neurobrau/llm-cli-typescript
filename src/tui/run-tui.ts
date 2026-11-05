@@ -7,6 +7,9 @@ import { PROGRAM_NAME } from "../args.js";
 import type { ChatInvocation } from "../args.js";
 import { startChat } from "../application/chat-startup.js";
 import type { ChatStartupDependencies } from "../application/chat-startup.js";
+import { PreferencesService } from "../application/preferences.js";
+import { ProviderHub } from "../application/provider-hub.js";
+import { Workspace } from "../application/workspace.js";
 import { fixedFailure, startupFailure } from "../chat/run-chat.js";
 import { OutputError, write } from "../io.js";
 import type { Io } from "../io.js";
@@ -50,11 +53,30 @@ export async function runTui(invocation: ChatInvocation, io: Io, deps: TuiRunDep
       await write(io.stderr, `${PROGRAM_NAME}: interrupted\n`);
       return startupCode; // no terminal change and no request after an interrupt during startup
     }
-    controller = new TuiController({
-      title: deps.title,
+    // The workspace gets the very settings store that loaded the file and the loaded document: settings are
+    // neither loaded twice nor rebuilt, so a store disabled at startup stays unwritable for the whole run.
+    const workspace = new Workspace({
+      hub: new ProviderHub({ initial: started.provider, createProvider: deps.createProvider, checkProviderReady: deps.checkProviderReady }),
+      preferences: new PreferencesService({
+        stored: started.storedSettings,
+        saver: started.settingsStore,
+        overrides: {
+          ...(invocation.reasoning === undefined ? {} : { reasoning: invocation.reasoning }),
+          ...(invocation.maxOutputTokens === undefined ? {} : { maxOutputTokens: invocation.maxOutputTokens }),
+          ...(invocation.answerStyle === undefined ? {} : { answerStyle: invocation.answerStyle }),
+        },
+      }),
       session: started.session,
       provider: started.provider,
       settings: started.settings,
+      history: started.history,
+      clock: deps.clock,
+      newId: deps.newId,
+      activeTracker: started.activeTracker,
+    });
+    controller = new TuiController({
+      title: deps.title,
+      workspace,
       warnings: started.warnings,
       terminal: host.createTerminal(deps.terminalEnvironment),
       timers: host.timers,
@@ -71,7 +93,7 @@ export async function runTui(invocation: ChatInvocation, io: Io, deps: TuiRunDep
       code = await fixedFailure(error, io);
     }
     if (invocation.transcriptOnExit) {
-      await write(io.stdout, transcriptText(started.session.snapshot().messages, { terminal: deps.terminalEnvironment.stdoutIsTTY }));
+      await write(io.stdout, transcriptText(workspace.session.snapshot().messages, { terminal: deps.terminalEnvironment.stdoutIsTTY }));
     }
     return code;
   } catch (error: unknown) {

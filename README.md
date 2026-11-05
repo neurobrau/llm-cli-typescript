@@ -1,6 +1,6 @@
 # NeuroBräu TypeScript
 
-TypeScript edition of the NeuroBräu LLM CLI. The current version is `0.3.0-dev` (work toward the fullscreen chat milestone); the completed milestones were `0.1.0` (CLI Foundation) and `0.2.0` (interactive chat, history, streaming). It can send **one one-shot prompt** to **OpenAI** (Responses API, official `openai` SDK 7.45.0) or to a **local Ollama server** (native HTTP API, no extra dependency) and print the answer, and, without a prompt, it runs a **fullscreen DOS-style chat** on a supported terminal (xterm, screen, tmux and rxvt families; see `docs/tui.md`) or, otherwise, a **line-oriented chat** (`YOU >` / `AI >`) on the same providers that restores and saves conversations, applies saved settings and understands `/help`, `/reset`, `/cleanup`, `/usage` and `/exit`. With `--stream` the answer is printed as it arrives, in both modes (real incremental streaming from OpenAI Responses and native Ollama). The fullscreen chat shows the current settings and token totals but has no F2–F6 selection menus, provider/model switching, preference writes or pricing yet (the cost field says `unavailable`). Conversation, `active.json`, settings and usage-record JSON follow the Python reference formats (`docs/storage.md`). No Git tag or release exists for any version.
+TypeScript edition of the NeuroBräu LLM CLI. The current version is `0.3.0-dev` (work toward the fullscreen chat milestone); the completed milestones were `0.1.0` (CLI Foundation) and `0.2.0` (interactive chat, history, streaming). It can send **one one-shot prompt** to **OpenAI** (Responses API, official `openai` SDK 7.45.0) or to a **local Ollama server** (native HTTP API, no extra dependency) and print the answer, and, without a prompt, it runs a **fullscreen DOS-style chat** on a supported terminal (xterm, screen, tmux and rxvt families; see `docs/tui.md`) or, otherwise, a **line-oriented chat** (`YOU >` / `AI >`) on the same providers that restores and saves conversations, applies saved settings and understands `/help`, `/reset`, `/cleanup`, `/usage` and `/exit`. With `--stream` the answer is printed as it arrives, in both modes (real incremental streaming from OpenAI Responses and native Ollama). The fullscreen chat has the F2 model, F3 provider, F4 reasoning, F5 max-output-tokens and F6 answer-style menus: every provider/model keeps its own conversation and usage, and confirmed F4/F5/F6 choices are saved in `settings.json`. There is no pricing yet (the cost field says `unavailable`). Conversation, `active.json`, settings and usage-record JSON follow the Python reference formats (`docs/storage.md`). No Git tag or release exists for any version.
 
 ## Prerequisites
 
@@ -139,7 +139,7 @@ echo "exit codes: ${PIPESTATUS[*]}"              # bash: the first (neurobrau) s
 
 ### Fullscreen chat (see `docs/tui.md`)
 
-Without a prompt, on a terminal whose `TERM` is in the xterm, screen, tmux or rxvt family and with stdin and stdout both attached to it, the chat is fullscreen (DOS-style, ASCII borders, a settings/tokens panel on the right at 64+ columns, minimum 40x12). `--plain`, pipes, redirects and any other `TERM` keep the line-oriented chat, which prints no escape sequences. `--transcript-on-exit` (fullscreen only) prints the committed conversation after the terminal is restored. The F2–F6 keys only show `WARNING | Settings menus are not implemented yet`; choose settings with the command-line options. Keys: Enter, Backspace/Delete, Left/Right, Home/Ctrl+A, End/Ctrl+E, Ctrl+U, Up/Down, PgUp/PgDn, F1 (`/help`), Ctrl+D on an empty line, Ctrl+C (cancels a running request, otherwise exits 130).
+Without a prompt, on a terminal whose `TERM` is in the xterm, screen, tmux or rxvt family and with stdin and stdout both attached to it, the chat is fullscreen (DOS-style, ASCII borders, a settings/tokens panel on the right at 64+ columns, minimum 40x12). `--plain`, pipes, redirects and any other `TERM` keep the line-oriented chat, which prints no escape sequences. `--transcript-on-exit` (fullscreen only) prints the committed conversation after the terminal is restored. F2 (model of the current provider), F3 (provider), F4 (reasoning), F5 (max output tokens, with a custom value prompt) and F6 (answer style) open selection menus (Up/Down/PgUp/PgDn/Home/End, Enter selects, Esc or Ctrl+D cancels; the menu is modal). Each provider/model has its own conversation and usage (`docs/tui.md`); a confirmed choice applies from the next message and is saved per model (style: globally) without clearing the conversation. Keys: Enter, Backspace/Delete, Left/Right, Home/Ctrl+A, End/Ctrl+E, Ctrl+U, Up/Down, PgUp/PgDn, F1 (`/help`), Ctrl+D on an empty line, Ctrl+C (cancels a running request, otherwise exits 130).
 
 ### Manual fullscreen smoke test (OWNER-RUN; NOT executed by the agent or the test suite)
 
@@ -179,6 +179,22 @@ runkey() { HOME="$S/home" XDG_STATE_HOME="$S/state" XDG_CONFIG_HOME="$S/config" 
 runkey --provider openai --stream
 echo "after exit run: reset"; reset   # only if your terminal looks wrong after an abnormal kill; SIGKILL cannot be restored by any program
 ```
+
+### Manual menu smoke test (OWNER-RUN; NOT executed by the agent or the test suite)
+
+Use the isolated tree and the `tui` function defined in the fullscreen smoke test above (run its first two lines first); the existing `qwen3.5:4b` suffices for F4/F5/F6. Nothing needs to be downloaded.
+
+```sh
+tui                       # fullscreen on qwen3.5:4b (add --stream if you like)
+#  F6, Down/Up, Enter  -> "Answer style: ..."; F4 -> reasoning items for the installed model; F5 -> Default / presets / Custom...
+#  Esc closes any menu without a change; check that settings.json appears only after a confirmed choice:
+find "$S/config" -type f
+#  F2 lists the installed models in `ollama list` order; open it and press Esc (no change); choose another INSTALLED model only if you already have one
+#  F3, Down, Enter on OpenAI with OPENAI_API_KEY unset (the tui function unsets it): "OpenAI is not available: ..." and the local chat continues
+#  restart `tui`: the chosen settings are applied (see the panel); /reset and /cleanup only touch $S
+```
+
+OpenAI examples keep your key: `export OPENAI_API_KEY=...` and use `runkey` (below), never the `env -u` wrapper.
 
 ### Manual smoke test (owner-run, makes real, billable requests)
 
@@ -225,7 +241,7 @@ Tests include unit tests, runner tests with injected writers, and integration te
 
 ## Planned milestones
 
-Pricing and cost estimates, the F2–F6 selection menus and provider/model switching come in later tasks (OpenAI and Ollama one-shot, the plain chat with history, `--stream` and the fullscreen chat foundation are implemented). Version plan: `0.1.0` completed CLI Foundation; `0.2.0` completed chat/history/streaming; `0.3.0-dev` (current) while the TUI is built, `0.3.0` when it is complete; `0.4.0-dev`/`0.4.0` for full parity. See `docs/architecture.md` and `docs/parity.md`.
+Pricing and cost estimates come in a later task (OpenAI and Ollama one-shot, the plain chat with history, `--stream`, the fullscreen chat and its menus, provider/model switching and saved preferences are implemented). Version plan: `0.1.0` completed CLI Foundation; `0.2.0` completed chat/history/streaming; `0.3.0-dev` (current) while the TUI is built, `0.3.0` when it is complete; `0.4.0-dev`/`0.4.0` for full parity. See `docs/architecture.md` and `docs/parity.md`.
 
 ## Working documents
 

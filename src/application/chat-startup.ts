@@ -17,7 +17,7 @@ import type { StorageEnvironment } from "../storage/fs/paths.js";
 import { matchesSelection } from "../storage/matching.js";
 import type { ActiveSelection, StoredConversation, StoredSettings } from "../storage/types.js";
 import { resolveSettings } from "./resolve-settings.js";
-import { ChatSession } from "./session.js";
+import { ActiveTracker, ChatSession } from "./session.js";
 import type { Clock, SessionHistory } from "./session.js";
 
 /** The reading half of a history store plus what the session writes through. */
@@ -33,6 +33,14 @@ export interface SettingsPort {
   load(): Promise<{ readonly settings: StoredSettings; readonly warnings: readonly string[] }>;
 }
 
+/** The result of saving settings; `warning` is user-facing. `SettingsStore.save` satisfies this structurally. */
+export type SettingsSaveResult = { readonly saved: true } | { readonly saved: false; readonly warning: string };
+
+/** Only the fullscreen chat saves settings; the plain chat and one-shot never see this. */
+export interface SettingsSaver {
+  save(settings: StoredSettings): Promise<SettingsSaveResult>;
+}
+
 export interface ChatStartupDependencies {
   /** The only source of state locations: no `process.env` and no `homedir()` here. */
   readonly environment: { readonly env: StorageEnvironment; readonly home?: string | undefined };
@@ -43,13 +51,23 @@ export interface ChatStartupDependencies {
   /** Throws a ProviderError when the selected provider cannot run (e.g. no API key). No network. */
   readonly checkProviderReady?: ((id: ProviderId) => void) | undefined;
   readonly createHistoryStore: (conversationsDirectory: string) => HistoryPort;
-  readonly createSettingsStore: (path: string) => SettingsPort;
+  readonly createSettingsStore: (path: string) => SettingsPort & Partial<SettingsSaver>;
 }
 
 export interface StartedChat {
   readonly session: ChatSession;
   readonly provider: Provider;
   readonly settings: ResolvedSettings;
+  /** The history access the session writes through (absent with `--no-history` or an unusable location). */
+  readonly history: HistoryPort | undefined;
+  /**
+   * The very store instance that loaded the settings (never rebuilt: its never-overwrite-an-unreadable-file
+   * state lives in it) and the loaded document; both absent when no settings location is usable.
+   */
+  readonly settingsStore: (SettingsPort & Partial<SettingsSaver>) | undefined;
+  readonly storedSettings: StoredSettings | undefined;
+  /** Shared by every session of this run. */
+  readonly activeTracker: ActiveTracker;
   /** Ordered startup warnings and notices, each shown once. */
   readonly warnings: readonly string[];
 }
@@ -117,8 +135,10 @@ export async function startChat(invocation: ChatInvocation, deps: ChatStartupDep
 
   // 6. Settings (read-only), capabilities, strict resolution: CLI > valid saved > built-in.
   let stored: StoredSettings | undefined;
+  let settingsStore: (SettingsPort & Partial<SettingsSaver>) | undefined;
   if (paths.settings.ok) {
-    const loaded = await deps.createSettingsStore(paths.settings.value).load();
+    settingsStore = deps.createSettingsStore(paths.settings.value);
+    const loaded = await settingsStore.load();
     ensureNotAborted(signal);
     stored = loaded.settings;
     warnings.push(...loaded.warnings);
@@ -144,14 +164,16 @@ export async function startChat(invocation: ChatInvocation, deps: ChatStartupDep
   });
   warnings.push(...resolution.notices);
 
+  const activeTracker = new ActiveTracker();
   const session = new ChatSession({
     selection: { provider: providerId, model },
     clock: deps.clock,
     newId: deps.newId,
     history,
     restored,
+    activeTracker,
   });
-  return { session, provider, settings: resolution.settings, warnings };
+  return { session, provider, settings: resolution.settings, warnings, history, settingsStore, storedSettings: stored, activeTracker };
 }
 
 /**

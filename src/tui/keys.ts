@@ -6,7 +6,8 @@
  *
  * A lone ESC cannot be told from the start of a sequence; the caller asks
  * `pendingEscape` after each chunk and calls `dropEscape()` once the short
- * wait (about 25 ms) passed without more input.
+ * wait (about 25 ms) passed without more input; that yields the `escape` key
+ * (ignored by the interface except in a menu or prompt).
  */
 
 export type NamedKey =
@@ -31,7 +32,8 @@ export type NamedKey =
   | "ctrl-c"
   | "ctrl-d"
   | "ctrl-e"
-  | "ctrl-u";
+  | "ctrl-u"
+  | "escape";
 
 export type Key =
   | { readonly kind: "text"; readonly text: string }
@@ -85,9 +87,11 @@ export class KeyDecoder {
     return this.state === "escape";
   }
 
-  /** The wait for the rest of a sequence is over: a lone ESC is ignored. */
-  dropEscape(): void {
-    if (this.state === "escape") this.state = "ground";
+  /** The wait for the rest of a sequence is over: the pending ESC was a key of its own. */
+  dropEscape(): Key[] {
+    if (this.state !== "escape") return [];
+    this.state = "ground";
+    return [{ kind: "key", name: "escape" }];
   }
 
   /** Decodes the next chunk; consecutive printable characters form one `text` key. */

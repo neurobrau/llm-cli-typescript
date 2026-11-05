@@ -171,7 +171,7 @@ async function main() {
 
 // ----- chat sessions -----
 
-function fakeProvider(id, answers, streams = []) {
+function fakeProvider(id, answers, streams = [], models = []) {
   const seen = [];
   return {
     id,
@@ -201,7 +201,7 @@ function fakeProvider(id, answers, streams = []) {
       };
     },
     async listModels() {
-      return [];
+      return models;
     },
     async checkAvailability() {
       return { available: true, message: "" };
@@ -273,14 +273,22 @@ async function runFullscreen(main, root, argv, steps, provider) {
     })(),
     tui: host,
   });
-  const until = async (condition) => {
+  const until = async (condition, what = "the expected screen") => {
     for (let i = 0; i < 5000 && !condition(); i += 1) await new Promise((resolve) => setTimeout(resolve, 2));
-    if (!condition()) throw new Error(`the fullscreen session did not reach the expected screen:\n${screen}`);
+    if (!condition()) throw new Error(`the fullscreen session did not reach ${what}:\n${screen}`);
   };
   await until(() => handlers !== undefined && screen !== "");
   for (const [keys, expected] of steps) {
-    handlers.onData(keys);
-    if (expected !== undefined) await until(() => screen.includes(expected));
+    // Keys are refused while the storage work of the previous step settles (a few milliseconds); send them again until they take effect.
+    for (let attempt = 0; attempt < 25; attempt += 1) {
+      handlers.onData(keys);
+      if (expected === undefined) break;
+      for (let wait = 0; wait < 100 && !screen.includes(expected); wait += 1) await new Promise((resolve) => setTimeout(resolve, 4));
+      if (screen.includes(expected)) break;
+    }
+    if (expected !== undefined) await until(() => screen.includes(expected), JSON.stringify(expected));
+    // Storage work of a confirmed choice or a switch settles in a few milliseconds; keys are refused until then.
+    await new Promise((resolve) => setTimeout(resolve, 80));
   }
   return finished;
 }
@@ -295,6 +303,8 @@ async function sessionChecks(codecs, pythonConversation) {
       files.set(`conversation_${prefix}_${name}`, readFileSync(join(conversations, name)));
     }
     files.set(`active_${prefix}.json`, readFileSync(join(root, "state", "neurobrau", "active.json")));
+    const settingsFile = join(root, "config", "neurobrau", "settings.json");
+    if (existsSync(settingsFile)) files.set(`settings_${prefix}.json`, readFileSync(settingsFile));
   };
 
   // A fresh session: unicode/control text, huge exact counts, an empty tier, an incomplete record, then /reset.
@@ -363,6 +373,50 @@ async function sessionChecks(codecs, pythonConversation) {
   const savedFullscreen = [...files].find(([name]) => name.startsWith("conversation_fullscreen_"));
   if (savedFullscreen === undefined || codecs.decodeConversation(savedFullscreen[1]).messages[1]?.content !== tuiText) {
     failures.push("fullscreen: the streamed answer was not saved byte for byte");
+  }
+
+  // A fullscreen session with the menus: saved settings (reasoning "default", max null and a custom value, global style)
+  // and independent conversations per model, restored with their usage.
+  const menus = join(scratch, "session-menus");
+  const catalog = [{ id: "hf.co/org/model:Q4_K_M", remote: false, details: "4B" }, { id: "second:latest", remote: false, details: "1B" }];
+  const menuProvider = fakeProvider("ollama", [
+    { kind: "completed", result: { text: "first model answer", usage: { inputTokens: big, outputTokens: 4n } } },
+    { kind: "completed", result: { text: "second model answer", usage: { inputTokens: 9n, outputTokens: 1n } } },
+  ], [], catalog);
+  const codeMenus = await runFullscreen(main, menus, ["--provider", "ollama", "--model", "hf.co/org/model:Q4_K_M"], [
+    ["m1\r", "DONE"],
+    ["\x1b[17~", "ANSWER STYLE ]"], ["\x1b[F", "3/3 Enter=OK"], ["\r", "Answer style: Detailed."], // F6, End, Enter
+    ["\x1bOS", "[ REASONING ]"], ["\r", "Reasoning for hf.co/org/model:Q4_K_M: Model default"], // F4: unknown support offers only the model default
+    ["\x1b[15~", "[ MAX OUTPUT TOKENS ]"], ["\x1b[F", "7/7 Enter=OK"], ["\r", "Type the max output tokens"], ["77\r", "Max output tokens for hf.co/org/model:Q4_K_M: 77."], // F5, End (Custom...), Enter
+    ["\x1bOQ", "[ SELECT OLLAMA MODEL ]"], ["\x1b[B", "2/2 Enter=OK"], ["\r", "Now using Ollama / second:latest."], // F2, Down, Enter
+    ["m2\r", "DONE"],
+    ["\x1bOQ", "[ SELECT OLLAMA MODEL ]"], ["\x1b[H", "1/2 Enter=OK"], ["\r", "conversation (2 messages)."], // back to the first model
+    ["\x1b[15~", "[ MAX OUTPUT TOKENS ]"], ["\x1b[H", "1/7 Enter=OK"], ["\r", "Max output tokens for hf.co/org/model:Q4_K_M: model"], // Default: an explicit null
+    ["/exit\r", undefined],
+  ], menuProvider);
+  if (codeMenus !== 0) failures.push(`TS fullscreen menu session exited ${String(codeMenus)}`);
+  collect(menus, "menus");
+  const menuFiles = [...files].filter(([name]) => name.includes("_menus"));
+  const menuSettings = menuFiles.find(([name]) => name.startsWith("settings_menus"));
+  if (menuSettings === undefined) {
+    failures.push("menus: no settings file was written");
+  } else {
+    const decodedSettings = codecs.decodeSettings(menuSettings[1]).settings;
+    const first = decodedSettings.providers.get("ollama")?.get("hf.co/org/model:Q4_K_M");
+    if (decodedSettings.answerStyle !== "detailed" || first?.reasoning !== "default" || first.maxOutputTokens !== null) {
+      failures.push(`menus: unexpected saved preferences ${JSON.stringify(first, (_k, v) => (typeof v === "bigint" ? `${v}n` : v))}`);
+    }
+  }
+  const menuConversations = menuFiles.filter(([name]) => name.startsWith("conversation_menus")).map(([, bytes]) => codecs.decodeConversation(bytes));
+  const byModel = new Map(menuConversations.map((conversation) => [conversation.model, conversation]));
+  if (menuConversations.length !== 2 || byModel.get("hf.co/org/model:Q4_K_M")?.messages[1]?.content !== "first model answer" || byModel.get("second:latest")?.messages[1]?.content !== "second model answer") {
+    failures.push("menus: the two selections did not keep independent conversations");
+  }
+  if (byModel.get("hf.co/org/model:Q4_K_M")?.requests.length !== 1 || byModel.get("hf.co/org/model:Q4_K_M")?.requests[0]?.usage.inputTokens !== big) {
+    failures.push("menus: the usage record of the first selection changed or leaked");
+  }
+  if (JSON.stringify(menuProvider.seen) !== JSON.stringify([["user:m1"], ["user:m2"]])) {
+    failures.push(`menus: unexpected request contexts ${JSON.stringify(menuProvider.seen)}`);
   }
 
   // A Python-written conversation continued by TS: context sent, prior records kept exactly.

@@ -61,6 +61,107 @@ const command = (...extra: string[]): string[] => [process.execPath, HARNESS, se
 
 const options = skip === undefined ? {} : { skip };
 
+/** Sends `keys` until `pattern` shows: storage writes of a previous step may still be settling (Enter/F-keys are refused meanwhile). */
+async function sendUntil(pty: Pty, keys: string, pattern: RegExp): Promise<void> {
+  for (let attempt = 0; attempt < 30; attempt += 1) {
+    const mark = pty.mark();
+    pty.send(keys);
+    const seen = await Promise.race([pty.waitFor(pattern, mark).then(() => true), new Promise<boolean>((resolveTimer) => setTimeout(() => { resolveTimer(false); }, 250))]);
+    if (seen) return;
+  }
+  throw new Error(`never saw ${String(pattern)}`);
+}
+
+const FKEY = { f2: "\x1bOQ", f5: "\x1b[15~", f6: "\x1b[17~" } as const;
+
+void describe("fullscreen menus in a real pseudo-terminal", options, () => {
+  void it("F2/F5/F6 and Esc through the production adapter: the next request carries the new model and settings, nothing of a cancelled exchange, and the files agree", async () => {
+    const both = [tag("m1", { capabilities: ["completion"], details: { context_length: 4096, parameter_size: "1B" } }), tag("m2", { capabilities: ["completion"], details: { context_length: 4096 } })];
+    const first = liveStream(NDJSON);
+    const second = liveStream(NDJSON);
+    server.expect(tags(...both), first.responder, second.responder);
+    const pty = new Pty(command("--stream", "--transcript-on-exit"), env);
+    await pty.waitFor(/\[ Input \]/u);
+
+    // a request that is cancelled after some text
+    pty.send("slow question\r");
+    const one = await first.opened();
+    await one.write(piece("partial"));
+    await pty.waitFor(/AI > partial/u);
+    pty.send("\u0003");
+    await pty.waitFor(/Cancelled\. The partial answer above was not saved\./u);
+    await one.closed;
+
+    // F2: pick the second model; a typed draft survives, and a lone Esc closes a menu without eating the next key
+    pty.send("my draft");
+    await pty.waitFor(/YOU > my draft/u);
+    pty.send(FKEY.f2);
+    await pty.waitFor(/SELECT OLLAMA MODEL/u);
+    pty.send("\x1b");
+    await new Promise((resolveTimer) => setTimeout(resolveTimer, 150)); // beyond the 25 ms wait for a sequence
+    const mark = pty.mark();
+    pty.send("!");
+    await pty.waitFor(/YOU > my draft!/u, mark);
+    pty.send(FKEY.f2);
+    await pty.waitFor(/SELECT OLLAMA MODEL/u);
+    pty.send("\x1b[B\r"); // Down, Enter
+    await pty.waitFor(/Now using Ollama \/ m2\. Started a new conversation\./u);
+
+    // F5 custom value, F6 style
+    await sendUntil(pty, FKEY.f5, /MAX OUTPUT TOKENS/u);
+    pty.send("\x1b[F\r"); // End (Custom...), Enter
+    await pty.waitFor(/TOKENS > /u);
+    pty.send("321\r");
+    await pty.waitFor(/Max output tokens for m2: 321\./u);
+    await sendUntil(pty, FKEY.f6, /\[ ANSWER STYLE \]/u);
+    pty.send("\x1b[F\r");
+    await pty.waitFor(/Answer style: Detailed\./u);
+
+    // the draft is still there; send it
+    const arrival = second.opened(); // asked once: every call would queue another waiter
+    let arrived = false;
+    for (let attempt = 0; attempt < 30 && !arrived; attempt += 1) {
+      pty.send("\r"); // refused while a storage write of the previous step is still settling
+      arrived = await Promise.race([arrival.then(() => true), new Promise<boolean>((resolveTimer) => setTimeout(() => { resolveTimer(false); }, 250))]);
+    }
+    assert.ok(arrived, "the request started");
+    const two = await arrival;
+    await two.write(piece("fresh answer") + finish());
+    two.end();
+    await pty.waitFor(/AI > fresh answer/u);
+    pty.send("/exit\r");
+    const done = await pty.exit;
+    assert.equal(done.code, 0);
+
+    const bodies = server.requests.filter((r) => r.path === "/api/chat").map(ollamaBody);
+    const [firstBody, secondBody] = bodies;
+    assert.ok(bodies.length === 2 && firstBody !== undefined && secondBody !== undefined);
+    assert.equal(firstBody.model, "m1");
+    assert.equal(secondBody.model, "m2");
+    const messages = secondBody.messages as { role: string; content: string }[];
+    assert.deepEqual(messages.map((m) => m.role), ["system", "user"]);
+    assert.equal(messages[1]?.content, "my draft!");
+    assert.ok(!JSON.stringify(secondBody).includes("slow question") && !JSON.stringify(secondBody).includes("partial"));
+    assert.deepEqual(secondBody.options, { num_predict: 321 });
+
+    const output = pty.text();
+    assert.equal(output.split(ENTER_SCREEN).length - 1, 1);
+    assert.equal(output.split(LEAVE_SCREEN).length - 1, 1);
+    const afterLeave = output.slice(output.indexOf(LEAVE_SCREEN) + LEAVE_SCREEN.length).replace(new RegExp(`${ESC}\\[[0-9;?]*[A-Za-z]`, "gu"), "");
+    assert.equal(afterLeave.replace(/\r\n/gu, "\n").trim(), "YOU > my draft!\n\nAI > fresh answer"); // the PTY turns LF into CRLF
+
+    const settings = JSON.parse(await readFile(join(scratch, "config", "neurobrau", "settings.json"), "utf8")) as { answer_style: string; providers: { ollama: { models: Record<string, Record<string, unknown>> } } };
+    assert.equal(settings.answer_style, "detailed");
+    assert.deepEqual(settings.providers.ollama.models.m2, { max_output_tokens: 321 });
+    assert.ok(!("m1" in settings.providers.ollama.models), "nothing was saved for the first model");
+    const directory = join(state, "neurobrau", "conversations");
+    const saved = await Promise.all((await readdir(directory)).map(async (name) => decodeConversation(await readFile(join(directory, name)))));
+    assert.deepEqual(saved.map((c) => [c.model, c.messages.map((m) => m.content)]), [["m2", ["my draft!", "fresh answer"]]]);
+    const active = JSON.parse(await readFile(join(state, "neurobrau", "active.json"), "utf8")) as { model: string };
+    assert.equal(active.model, "m2");
+  });
+});
+
 void describe("fullscreen chat in a real pseudo-terminal", options, () => {
   void it("takes the terminal over, cancels with Ctrl+C, continues in the same screen, and restores everything on /exit", async () => {
     const first = liveStream(NDJSON);

@@ -13,15 +13,16 @@ Backslash aliases also work: \\help, \\reset, \\cleanup, \\usage, \\exit.
 Keys: F1 this help, Enter send, Backspace/Delete edit, Left/Right/Home/End move,
 Ctrl+U clear input, PgUp/PgDn/Up/Down scroll, Ctrl+D (empty input) or Ctrl+C quit.
 Ctrl+C while a response is generated cancels it.
-F2-F6 (model, provider, reasoning, max output tokens, answer style) menus are
-not implemented yet; start with --provider, --model, --reasoning-effort,
---max-output-tokens and --answer-style to choose them.`;
+F2 model, F3 provider (each provider/model keeps its own conversation).
+F4 reasoning, F5 max output tokens, F6 answer style (keep the conversation;
+they apply from the next message and are saved per model, the style globally).
+In menus: Up/Down/PgUp/PgDn/Home/End move, Enter selects, Esc or Ctrl+D cancels.`;
 
 export const NOTICE_BUSY = "A response is being generated; wait or press Ctrl+C";
 export const NOTICE_BUSY_SETTINGS = "Settings cannot change while a response is generated";
 export const NOTICE_STILL_CLOSING = "The cancelled response is still closing; try again shortly";
 export const NOTICE_WORKING = "Please wait; the conversation is being updated";
-export const NOTICE_MENUS_PENDING = "Settings menus are not implemented yet";
+export const NOTICE_WAIT_CHECK = "Wait for the current check or press Ctrl+C";
 export const NOTICE_INPUT_FULL = "The input is too long; the extra text was dropped";
 export const NOTICE_NOT_SAVED = " The partial answer above was not saved.";
 

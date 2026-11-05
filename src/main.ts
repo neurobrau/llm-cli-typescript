@@ -1,7 +1,7 @@
 import { PROGRAM_NAME, parseCliArgs } from "./args.js";
 import type { PromptInvocation } from "./args.js";
 import { resolveSettings } from "./application/resolve-settings.js";
-import type { HistoryPort, SettingsPort } from "./application/chat-startup.js";
+import type { HistoryPort, SettingsPort, SettingsSaver } from "./application/chat-startup.js";
 import { runChat } from "./chat/run-chat.js";
 import { selectChatMode } from "./tui/eligibility.js";
 import { runTui } from "./tui/run-tui.js";
@@ -58,7 +58,7 @@ export interface RunDependencies {
   readonly newId?: () => string;
   /** Stores are built only from paths resolved out of `storageEnvironment`. Defaults: the filesystem stores. */
   readonly createHistoryStore?: (conversationsDirectory: string) => HistoryPort;
-  readonly createSettingsStore?: (path: string) => SettingsPort;
+  readonly createSettingsStore?: (path: string) => SettingsPort & Partial<SettingsSaver>;
   /**
    * The terminal for the fullscreen chat. Absent (the default): the fullscreen
    * interface is never used and no terminal is ever inspected or changed.

@@ -25,7 +25,7 @@ void describe("fullscreen: commands", () => {
   void it("/help, F1 (keeping the draft), /usage and unknown commands; aliases and case", async () => {
     const session = await startTui();
     await submit(session, "/help");
-    assert.ok(session.term.flat().includes("menus are not implemented yet"));
+    assert.ok(session.term.flat().includes("In menus: Up/Down/PgUp/PgDn/Home/End move"));
     for (let i = 0; i < 3; i += 1) await session.key(KEYS.pageUp);
     assert.ok(session.term.flat().includes("Commands: /help show this help"));
     await session.key(KEYS.enter);
@@ -46,18 +46,16 @@ void describe("fullscreen: commands", () => {
     assertRestoredOnce(session);
   });
 
-  void it("F2-F6 do nothing but show that menus are pending, and never touch the provider or settings", async () => {
-    const session = await startTui();
-    for (const key of [KEYS.f2, KEYS.f3, KEYS.f4, KEYS.f5, KEYS.f6]) {
+  void it("F2-F6 open their menus (F3 and F6 at once, the others after a check) and Esc or Ctrl+D close them without any change", async () => {
+    const session = await startTui({ argv: ["--provider", "ollama"] });
+    for (const [key, title] of [[KEYS.f3, "SELECT PROVIDER"], [KEYS.f6, "ANSWER STYLE"]] as const) {
       await session.key(key);
-      assert.equal(session.term.status(), "WARNING | Settings menus are not implemented yet");
+      assert.ok(session.term.text().includes(`[ ${title} ]`), title);
+      await session.key(KEYS.ctrlD);
+      assert.ok(!session.term.text().includes(`[ ${title} ]`));
     }
-    await session.key("x"); // any key clears the transient warning
-    assert.equal(session.term.status(), "READY");
     assert.equal(session.provider.calls + session.provider.streamCalls, 0);
-    assert.deepEqual(session.provider.capabilityCalls, ["default-model"]); // only the startup lookup
     assert.deepEqual(session.history.calls.filter((call) => call !== "loadActive" && call !== "loadLatest"), []);
-    await session.key(KEYS.ctrlU);
     await session.key(KEYS.ctrlD);
     assert.equal((await session.result).code, 0);
   });

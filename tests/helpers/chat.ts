@@ -140,7 +140,7 @@ export const incompleteEvent = (partialText: string, usage?: TokenUsage, reason 
 
 /** A provider whose generate() follows a queue of handlers; it records snapshots and concurrency. */
 export class ScriptedProvider implements Provider {
-  readonly label = "Scripted";
+  label = "Scripted";
   readonly requests: GenerationRequest[] = [];
   readonly capabilityCalls: string[] = [];
   inFlight = 0;
@@ -466,6 +466,10 @@ export class MemoryHistory implements HistoryPort {
   onSave: (() => void) | undefined;
   latest: StoredConversation | undefined;
   active: ActiveSelection | undefined;
+  /** Conversations "on disk": everything saved so far plus whatever a test puts here. */
+  readonly disk = new Map<string, StoredConversation>();
+  /** Every `loadLatest` filter result is recorded as the id picked (or undefined). */
+  readonly picked: (string | undefined)[] = [];
 
   async save(conversation: StoredConversation): Promise<unknown> {
     this.calls.push("save");
@@ -473,6 +477,7 @@ export class MemoryHistory implements HistoryPort {
     await this.saveGate;
     if (this.saveError !== undefined) throw this.saveError;
     this.saved.push(conversation);
+    this.disk.set(conversation.id, conversation);
     return {};
   }
 
@@ -490,7 +495,12 @@ export class MemoryHistory implements HistoryPort {
 
   deleteAll(): Promise<{ deleted: number; error: { message: string } | undefined }> {
     this.calls.push("deleteAll");
-    return Promise.resolve(this.deleteResult ?? { deleted: this.files, error: undefined });
+    const result = this.deleteResult ?? { deleted: this.files, error: undefined };
+    if (result.error === undefined) {
+      this.disk.clear();
+      this.latest = undefined;
+    }
+    return Promise.resolve(result);
   }
 
   loadActive(): Promise<{ selection: ActiveSelection | undefined; warning: string | undefined }> {
@@ -500,7 +510,12 @@ export class MemoryHistory implements HistoryPort {
 
   loadLatest(accepts: (conversation: StoredConversation) => boolean): Promise<{ conversation: StoredConversation | undefined; warnings: string[] }> {
     this.calls.push("loadLatest");
-    const found = this.latest !== undefined && accepts(this.latest) ? this.latest : undefined;
+    const candidates = [...(this.latest === undefined ? [] : [this.latest]), ...this.disk.values()].filter((conversation) => accepts(conversation));
+    let found: StoredConversation | undefined;
+    for (const candidate of candidates) {
+      if (found === undefined || candidate.updatedAt.getTime() >= found.updatedAt.getTime()) found = candidate;
+    }
+    this.picked.push(found?.id);
     return Promise.resolve({ conversation: found, warnings: [] });
   }
 }

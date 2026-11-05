@@ -6,11 +6,12 @@ import type { ResolvedSettings } from "../domain/settings.js";
 import { createFrame, put } from "./frame.js";
 import type { Frame, Style } from "./frame.js";
 import { MIN_COLS, MIN_ROWS, computeLayout, horizontalRule, visibleWindow } from "./layout.js";
+import { footerOf, menuBox, menuLine } from "./menu.js";
 import type { Layout } from "./layout.js";
-import { AI_LABEL, USER_LABEL } from "./model.js";
+import { AI_LABEL, TOKENS_LABEL, USER_LABEL } from "./model.js";
 import type { EntryKind, TuiModel } from "./model.js";
 import { settingsPanelRows } from "./panel.js";
-import { STATE_STYLES, SEPARATOR, activeStatus, WAITING_COMPLETE, statusText } from "./status.js";
+import { STATE_STYLES, SEPARATOR, activeStatus, WAITING_COMPLETE, ready, statusText } from "./status.js";
 import type { RuntimeStatus } from "./status.js";
 import { fit, neutralize } from "./text.js";
 
@@ -41,6 +42,8 @@ export function currentStatus(model: TuiModel, now: number): RuntimeStatus {
     if (live.firstTextAt === undefined && !live.thinking) return activeStatus("CONNECTING", elapsed);
     return activeStatus("GENERATING", elapsed, live.firstTextAt === undefined ? "Thinking" : undefined);
   }
+  if (model.checking !== undefined) return { state: "CONNECTING", parts: [model.checking] };
+  if (model.prompt !== undefined) return ready("Type a token limit and press Enter", "Esc cancels");
   if (model.confirmingCleanup) {
     return { state: "WARNING", parts: ["Type yes to delete saved conversations; anything else cancels"] };
   }
@@ -61,6 +64,7 @@ export function renderFrame(model: TuiModel, context: RenderContext): Frame {
   renderPanel(frame, layout, model, context);
   renderStatus(frame, layout, currentStatus(model, context.now));
   renderInput(frame, layout, model);
+  renderMenu(frame, layout, model);
   return frame;
 }
 
@@ -135,11 +139,30 @@ function renderStatus(frame: Frame, layout: Layout, status: RuntimeStatus): void
 }
 
 function renderInput(frame: Frame, layout: Layout, model: TuiModel): void {
-  const fieldWidth = Math.max(1, layout.innerWidth - USER_LABEL.length);
+  const label = model.prompt === undefined ? USER_LABEL : TOKENS_LABEL;
+  const fieldWidth = Math.max(1, layout.innerWidth - label.length);
   const { visible, column } = model.editor.viewport(fieldWidth);
-  put(frame, layout.inputRow, 2, USER_LABEL, "user", layout.cols - 2);
-  put(frame, layout.inputRow, 2 + USER_LABEL.length, neutralize(visible), "text", layout.cols - 2);
-  frame.cursor = { row: layout.inputRow, col: Math.min(layout.cols - 3, 2 + USER_LABEL.length + column) };
+  put(frame, layout.inputRow, 2, label, "user", layout.cols - 2);
+  put(frame, layout.inputRow, 2 + label.length, neutralize(visible), "text", layout.cols - 2);
+  frame.cursor = { row: layout.inputRow, col: Math.min(layout.cols - 3, 2 + label.length + column) };
+}
+
+/** The open menu as a bordered box over the conversation; the highlight is clamped to what fits now. */
+function renderMenu(frame: Frame, layout: Layout, model: TuiModel): void {
+  const { menu } = model;
+  if (menu === undefined) return;
+  const box = menuBox(menu, layout);
+  menu.scrollIntoView(box.visible);
+  const right = box.x + box.width;
+  put(frame, box.y, box.x, horizontalRule(box.width, menu.title), "border", right);
+  for (const [offset, item] of menu.items.slice(menu.top, menu.top + box.visible).entries()) {
+    const row = box.y + 1 + offset;
+    const style: Style = menu.top + offset === menu.index ? "selected" : "text";
+    put(frame, row, box.x, "|", "border", right);
+    put(frame, row, box.x + 1, ` ${menuLine(item, box.width - 4)} `, style, right - 1);
+    put(frame, row, right - 1, "|", "border", right);
+  }
+  put(frame, box.y + box.height - 1, box.x, horizontalRule(box.width, footerOf(menu)), "border", right);
 }
 
 export { statusText };

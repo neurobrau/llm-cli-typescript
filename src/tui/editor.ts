@@ -35,6 +35,14 @@ export class InputEditor {
     this.position = this.value.length;
   }
 
+  /** Restores a draft and cursor exactly as they were (the cursor is clamped to a code point boundary). */
+  restore(text: string, cursor: number): void {
+    this.value = this.clip(text, this.maxLength);
+    let at = Math.max(0, Math.min(cursor, this.value.length));
+    if (at > 0 && at < this.value.length && isLow(this.value.charCodeAt(at)) && isHigh(this.value.charCodeAt(at - 1))) at -= 1;
+    this.position = at;
+  }
+
   clear(): void {
     this.value = "";
     this.position = 0;

@@ -133,7 +133,7 @@ function describeSupport(model: string, support: ReasoningSupport): string {
 }
 
 /** Display name as in the references: only an absent value is "Model default"; the stored "default" is "Default". */
-function reasoningLabel(value: string): string {
+export function reasoningLabel(value: string): string {
   switch (value) {
     case "xhigh":
       return "XHigh";

@@ -91,9 +91,18 @@ export class Pty {
   }
 
   /** Resolves when `pattern` matches the screen text (CSI removed) received after `from` (a `mark()`). */
-  waitFor(pattern: RegExp, from = this.output.length): Promise<void> {
-    return new Promise((resolvePromise) => {
-      this.waiters.push({ pattern, from, resolve: resolvePromise });
+  waitFor(pattern: RegExp, from = this.output.length, timeoutMs = 10_000): Promise<void> {
+    return new Promise((resolvePromise, reject) => {
+      const timer = setTimeout(() => {
+        const at = this.waiters.findIndex((waiter) => waiter.resolve === done);
+        if (at >= 0) this.waiters.splice(at, 1);
+        reject(new Error(`timed out waiting for ${String(pattern)}; the screen ended with: ${this.screenText().slice(-700)}`));
+      }, timeoutMs);
+      const done = (): void => {
+        clearTimeout(timer);
+        resolvePromise();
+      };
+      this.waiters.push({ pattern, from, resolve: done });
       this.check();
     });
   }

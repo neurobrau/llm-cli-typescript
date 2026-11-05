@@ -27,6 +27,14 @@ export interface SessionHistory {
   deleteAll(): Promise<{ readonly deleted: number; readonly error: { readonly message: string } | undefined }>;
 }
 
+/**
+ * The selection last written to `active.json` by this run. Shared by all sessions of a run (one per
+ * provider/model), so a switch back to a remembered conversation writes the file only when it differs.
+ */
+export class ActiveTracker {
+  saved: ActiveSelection | undefined;
+}
+
 export interface SessionOptions {
   /** The provider/model of this conversation; fixed for the session. */
   readonly selection: ActiveSelection;
@@ -36,6 +44,8 @@ export interface SessionOptions {
   readonly history?: SessionHistory | undefined;
   /** A conversation to continue; copied on adoption. */
   readonly restored?: StoredConversation | undefined;
+  /** Shared across the sessions of one run; default: private to this session. */
+  readonly activeTracker?: ActiveTracker | undefined;
 }
 
 /** An independent copy of the session state; mutating it changes nothing. */
@@ -93,7 +103,7 @@ export class ChatSession {
   private requests: StoredUsageRecord[] = [];
   private onDisk = false;
   private restoredCount = 0;
-  private activeSaved: ActiveSelection | undefined;
+  private readonly tracker: ActiveTracker;
   private tail: Promise<unknown> = Promise.resolve();
   private pending = 0;
 
@@ -102,6 +112,7 @@ export class ChatSession {
     this.clock = options.clock;
     this.newId = options.newId;
     this.history = options.history;
+    this.tracker = options.activeTracker ?? new ActiveTracker();
     if (options.restored === undefined) {
       this.startNew();
     } else {
@@ -111,6 +122,11 @@ export class ChatSession {
 
   get persistent(): boolean {
     return this.history !== undefined;
+  }
+
+  /** Whether this conversation is worth remembering when another selection is used: it has content or a file. */
+  get retainable(): boolean {
+    return this.messages.length > 0 || this.requests.length > 0 || this.onDisk;
   }
 
   get historyDirectory(): string | undefined {
@@ -183,6 +199,14 @@ export class ChatSession {
     });
   }
 
+  /**
+   * Records this selection in `active.json` (only when it differs from what this run wrote last);
+   * a restored or remembered conversation is not rewritten. Returns warnings.
+   */
+  persistActive(): Promise<readonly string[]> {
+    return this.exclusive(() => (this.history === undefined ? Promise.resolve([]) : this.writeActive(this.history)));
+  }
+
   /** Number of saved conversation files; rejects like the store does. Zero without history. */
   countSaved(): Promise<number> {
     return this.exclusive(() => (this.history === undefined ? Promise.resolve(0) : this.history.countConversations()));
@@ -230,12 +254,12 @@ export class ChatSession {
       return [rethrowUnlessStorage(error)];
     }
     this.onDisk = true;
-    return this.saveActive(history);
+    return this.writeActive(history);
   }
 
-  private async saveActive(history: SessionHistory): Promise<string[]> {
+  private async writeActive(history: SessionHistory): Promise<string[]> {
     const wanted = this.selection;
-    if (this.activeSaved?.provider === wanted.provider && this.activeSaved.model === wanted.model) {
+    if (this.tracker.saved?.provider === wanted.provider && this.tracker.saved.model === wanted.model) {
       return [];
     }
     try {
@@ -243,7 +267,7 @@ export class ChatSession {
     } catch (error: unknown) {
       return [rethrowUnlessStorage(error)];
     }
-    this.activeSaved = { ...wanted };
+    this.tracker.saved = { ...wanted };
     return [];
   }
 

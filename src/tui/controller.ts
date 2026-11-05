@@ -22,7 +22,6 @@
 import { STREAM_UNCLOSED, consumeStream } from "../application/stream-consumer.js";
 import type { StreamConsumption } from "../application/stream-consumer.js";
 import { describeStorageFailure } from "../application/session.js";
-import type { ChatSession } from "../application/session.js";
 import { usageReport } from "../application/usage-report.js";
 import {
   NOTICE_CLEANUP_CANCELLED,
@@ -35,7 +34,9 @@ import {
   localMinute,
   parseCommand,
 } from "../chat/commands.js";
-import { ProviderError, isAbortError } from "../domain/errors.js";
+import { SwitchRefusal } from "../application/workspace.js";
+import type { PreparedSwitch, Workspace } from "../application/workspace.js";
+import { ProviderError, SettingsError, isAbortError } from "../domain/errors.js";
 import { snapshotRequest } from "../domain/generation.js";
 import type {
   GenerationOutcome,
@@ -45,18 +46,23 @@ import type {
   StreamMetadata,
   TerminalStreamEvent,
 } from "../domain/generation.js";
+import { ANSWER_STYLES, styleInstructions } from "../domain/settings.js";
+import type { AnswerStyle, ModelCapabilities } from "../domain/settings.js";
 import type { Provider } from "../domain/provider.js";
-import type { ResolvedSettings } from "../domain/settings.js";
-import { styleInstructions } from "../domain/settings.js";
 import { EXIT_FAILURE, EXIT_OK, OutputError, hasErrorCode } from "../io.js";
 import { displayPath } from "../storage/fs/errors.js";
+import { computeLayout } from "./layout.js";
+import { CUSTOM_ID, modelMenu, providerMenu, reasoningChoiceLabel, reasoningMenu, reasoningValueOf, styleMenu, tokensMenu } from "./menu-builders.js";
+import { menuVisible } from "./menu.js";
+import type { Menu } from "./menu.js";
+import { parseTokenInput } from "./token-input.js";
 import { KeyDecoder } from "./keys.js";
 import type { Key } from "./keys.js";
 import { TuiModel } from "./model.js";
 import type { Entry } from "./model.js";
 import { panelStats } from "./panel.js";
 import { renderFrame } from "./render.js";
-import { doneStatus, ready, warning } from "./status.js";
+import { READY, doneStatus, ready, warning } from "./status.js";
 import type { RuntimeStatus } from "./status.js";
 import { TerminalError } from "./terminal.js";
 import type { Terminal, Timers, TimerHandle } from "./terminal.js";
@@ -64,7 +70,7 @@ import {
   NOTICE_BUSY,
   NOTICE_BUSY_SETTINGS,
   NOTICE_INPUT_FULL,
-  NOTICE_MENUS_PENDING,
+  NOTICE_WAIT_CHECK,
   NOTICE_NOT_SAVED,
   NOTICE_STILL_CLOSING,
   NOTICE_WORKING,
@@ -85,9 +91,7 @@ const EXIT_NOW_DIAGNOSTIC = "an internal error occurred";
 export interface TuiOptions {
   /** `NeuroBräu TypeScript CLI <version>`. */
   readonly title: string;
-  readonly session: ChatSession;
-  readonly provider: Provider;
-  readonly settings: ResolvedSettings;
+  readonly workspace: Workspace;
   readonly warnings: readonly string[];
   readonly terminal: Terminal;
   readonly timers: Timers;
@@ -106,7 +110,13 @@ export interface TuiResult {
   readonly diagnostic?: string;
 }
 
-type Phase = "idle" | "generating" | "cancelling" | "saving" | "working";
+type Phase = "idle" | "generating" | "cancelling" | "saving" | "working" | "checking";
+
+/** A running discovery/preparation check; like a request it is retired before it is aborted. */
+interface CheckOp {
+  readonly abort: AbortController;
+  retired: boolean;
+}
 
 interface ActiveRequest {
   readonly id: number;
@@ -121,8 +131,8 @@ interface ActiveRequest {
   entry: Entry | undefined;
 }
 
-type Settled =
-  | { readonly kind: "outcome"; readonly outcome: GenerationOutcome }
+type Settled<T> =
+  | { readonly kind: "value"; readonly value: T }
   | { readonly kind: "error"; readonly error: unknown }
   | { readonly kind: "stuck" };
 
@@ -136,6 +146,9 @@ export class TuiController {
   private readonly decoder = new KeyDecoder();
   private phase: Phase = "idle";
   private request: ActiveRequest | undefined;
+  private check: CheckOp | undefined;
+  /** Capabilities read for the open F4/F5 menu or custom prompt, used when the choice is applied. */
+  private menuCapabilities: ModelCapabilities | undefined;
   private requestSeq = 0;
   private inflight: Promise<void> | undefined;
   private exit: TuiResult | undefined;
@@ -156,6 +169,10 @@ export class TuiController {
     this.done = new Promise<TuiResult>((resolve) => {
       this.finish = resolve;
     });
+  }
+
+  private get workspace(): Workspace {
+    return this.options.workspace;
   }
 
   /** Runs until the interface exits; the terminal is restored before this resolves. */
@@ -247,6 +264,7 @@ export class TuiController {
     this.exit = result;
     const request = this.request;
     if (request !== undefined && !request.retired) this.retire(request);
+    if (this.check !== undefined && !this.check.retired) this.retireCheck(this.check);
     this.escapeTimer?.cancel();
     void this.shutdown();
   }
@@ -279,7 +297,14 @@ export class TuiController {
     }
     if (this.decoder.pendingEscape && !this.exiting()) {
       this.escapeTimer = this.options.timers.after(this.options.escapeMs ?? 25, () => {
-        this.guard(() => { this.decoder.dropEscape(); });
+        this.guard(() => {
+          this.escapeTimer = undefined;
+          for (const key of this.decoder.dropEscape()) {
+            if (this.exiting()) return;
+            this.handleKey(key);
+          }
+          this.requestDraw(true);
+        });
       });
     }
     this.requestDraw(true);
@@ -303,6 +328,10 @@ export class TuiController {
   private handleKey(key: Key): void {
     this.model.releaseTransient();
     if (key.kind === "ignored") return;
+    if (this.model.menu !== undefined) {
+      this.handleMenuKey(this.model.menu, key); // modal: nothing reaches the draft
+      return;
+    }
     if (key.kind === "text") {
       if (!this.model.editor.insert(key.text)) this.flash(warning(NOTICE_INPUT_FULL));
       return;
@@ -329,8 +358,10 @@ export class TuiController {
       case "f4":
       case "f5":
       case "f6":
-        if (this.busy()) this.flash(warning(NOTICE_BUSY_SETTINGS));
-        else this.model.status = warning(NOTICE_MENUS_PENDING);
+        this.settingsKey(key.name);
+        break;
+      case "escape":
+        if (this.model.prompt !== undefined) this.cancelPrompt();
         break;
       case "ctrl-c": this.ctrlC(); break;
       case "ctrl-d":
@@ -344,6 +375,9 @@ export class TuiController {
     switch (this.phase) {
       case "generating":
         if (this.request !== undefined) this.cancelRequest(this.request);
+        break;
+      case "checking":
+        if (this.check !== undefined) this.cancelCheck(this.check);
         break;
       case "cancelling":
         break; // already cancelling; repeats are absorbed
@@ -376,6 +410,10 @@ export class TuiController {
       this.submitWhileBusy(text);
       return;
     }
+    if (this.model.prompt !== undefined) {
+      this.submitPrompt(text);
+      return;
+    }
     this.model.editor.clear();
     if (text === "") return;
     this.model.scroll = 0;
@@ -396,16 +434,15 @@ export class TuiController {
       this.requestExit({ code: EXIT_OK });
     } else if (command === "help" || command === "usage") {
       this.model.editor.clear();
-      this.append("info", command === "help" ? TUI_HELP : usageReport(this.options.session.snapshot().requests));
+      this.append("info", command === "help" ? TUI_HELP : usageReport(this.workspace.session.snapshot().requests));
       this.model.scroll = 0;
     } else if (text !== "") {
-      const notice = this.phase === "cancelling" ? NOTICE_STILL_CLOSING : this.phase === "generating" ? NOTICE_BUSY : NOTICE_WORKING;
-      this.flash(warning(notice));
+      this.flash(warning(this.busyNotice(NOTICE_BUSY)));
     }
   }
 
   private command(name: string): void {
-    const { session } = this.options;
+    const { session } = this.workspace;
     switch (name) {
       case "exit":
         this.requestExit({ code: EXIT_OK });
@@ -433,7 +470,7 @@ export class TuiController {
   }
 
   private async startCleanup(): Promise<void> {
-    const { session } = this.options;
+    const { session } = this.workspace;
     const directory = session.historyDirectory;
     if (directory === undefined) {
       this.append("info", NOTICE_HISTORY_DISABLED);
@@ -462,8 +499,9 @@ export class TuiController {
       return;
     }
     this.work(async () => {
-      const outcome = await this.options.session.cleanup();
+      const outcome = await this.workspace.session.cleanup();
       if (outcome.kind === "deleted") {
+        this.workspace.forgetOthers(); // nothing remembered in memory may come back after the files are gone
         this.clearPanel(`Deleted ${String(outcome.deleted)} saved conversation(s). Started a new conversation.`);
         this.model.status = ready("Saved conversations deleted");
       } else if (outcome.kind === "failed") {
@@ -508,7 +546,8 @@ export class TuiController {
   // ----- requests -----
 
   private send(text: string): void {
-    const { session, settings, provider, timers } = this.options;
+    const { session, settings, provider } = this.workspace;
+    const { timers } = this.options;
     const instructions = styleInstructions(settings.answerStyle.value);
     // The immutable snapshot is taken now, from committed history plus this prompt only.
     const snapshot = snapshotRequest({
@@ -568,12 +607,12 @@ export class TuiController {
   }
 
   /** Waits for the operation; after an abort, at most the cleanup bound. Never rejects. */
-  private settleBounded(operation: Promise<GenerationOutcome>, signal: AbortSignal): Promise<Settled> {
-    const finished: Promise<Settled> = operation.then(
-      (outcome): Settled => ({ kind: "outcome", outcome }),
-      (error: unknown): Settled => ({ kind: "error", error }),
+  private settleBounded<T>(operation: Promise<T>, signal: AbortSignal): Promise<Settled<T>> {
+    const finished: Promise<Settled<T>> = operation.then(
+      (value): Settled<T> => ({ kind: "value", value }),
+      (error: unknown): Settled<T> => ({ kind: "error", error }),
     );
-    return new Promise<Settled>((resolve) => {
+    return new Promise<Settled<T>>((resolve) => {
       let timer: TimerHandle | undefined;
       const onAbort = (): void => {
         timer = this.options.timers.after(this.options.cleanupTimeoutMs, () => { resolve({ kind: "stuck" }); });
@@ -678,7 +717,7 @@ export class TuiController {
     return this.accept(request, end.event);
   }
 
-  private finishGenerate(request: ActiveRequest, settled: Settled): Promise<void> | undefined {
+  private finishGenerate(request: ActiveRequest, settled: Settled<GenerationOutcome>): Promise<void> | undefined {
     if (request.retired || this.exit !== undefined || settled.kind === "stuck") {
       return this.endCancelled(request, settled.kind === "stuck");
     }
@@ -691,7 +730,7 @@ export class TuiController {
       this.endRequest(request);
       throw error;
     }
-    const { outcome } = settled;
+    const outcome = settled.value;
     if (outcome.kind === "completed") return this.accept(request, { kind: "completed", result: outcome.result });
     return this.accept(request, outcome);
   }
@@ -718,7 +757,8 @@ export class TuiController {
 
   /** Applies the single terminal result of a request. Synchronous; returns the save to await, if any. */
   private accept(request: ActiveRequest, finished: Finished | TerminalStreamEvent): Promise<void> | undefined {
-    const { session, timers } = this.options;
+    const { session } = this.workspace;
+    const { timers } = this.options;
     this.endRequest(request);
     const shown = request.text !== "" || (finished.kind === "incomplete" && finished.partialText !== "");
     const suffix = shown ? NOTICE_NOT_SAVED : "";
@@ -757,7 +797,7 @@ export class TuiController {
 
   /** Persists after a commit; a storage failure is a warning and never undoes the memory state. */
   private async save(final: RuntimeStatus, keepStatus = false): Promise<void> {
-    const { session } = this.options;
+    const { session } = this.workspace;
     try {
       const warnings = await session.persist();
       this.model.status = final;
@@ -773,10 +813,301 @@ export class TuiController {
     }
   }
 
+  // ----- menus and checks (F2-F6) -----
+
+  /** Which notice explains why an action is refused in the current phase. */
+  private busyNotice(generating: string): string {
+    switch (this.phase) {
+      case "generating":
+        return generating;
+      case "checking":
+        return NOTICE_WAIT_CHECK;
+      case "cancelling":
+        return NOTICE_STILL_CLOSING;
+      default:
+        return NOTICE_WORKING;
+    }
+  }
+
+  private settingsKey(name: "f2" | "f3" | "f4" | "f5" | "f6"): void {
+    if (this.model.prompt !== undefined) return; // the custom prompt ignores function keys
+    if (this.busy()) {
+      this.flash(warning(this.busyNotice(NOTICE_BUSY_SETTINGS)));
+      return;
+    }
+    this.model.scroll = 0;
+    const { provider, selection } = this.workspace;
+    switch (name) {
+      case "f2":
+        this.startCheck(`Loading ${provider.label} models`, (signal) => provider.listModels(signal), (models) => {
+          const menu = modelMenu(selection.provider, models, selection.model);
+          if (menu === undefined) this.append("error", `No selectable ${provider.label} models were found.`);
+          else this.model.menu = menu;
+        });
+        break;
+      case "f3":
+        this.model.menu = providerMenu(provider.id);
+        break;
+      case "f4":
+        this.startCheck("Checking reasoning support", (signal) => provider.getCapabilities(selection.model, signal), (capabilities) => {
+          const opened = reasoningMenu(selection.model, capabilities, this.workspace.settings.reasoning);
+          this.menuCapabilities = capabilities;
+          if (opened.kind === "none") {
+            this.append("info", opened.message);
+            return;
+          }
+          if (opened.info !== undefined) this.append("info", opened.info);
+          this.model.menu = opened.menu;
+        });
+        break;
+      case "f5":
+        this.startCheck("Checking model limits", (signal) => provider.getCapabilities(selection.model, signal), (capabilities) => {
+          this.menuCapabilities = capabilities;
+          this.model.menu = tokensMenu(this.workspace.settings.maxOutputTokens, capabilities.maxOutputTokensLimit);
+        });
+        break;
+      case "f6":
+        this.model.menu = styleMenu(this.workspace.settings.answerStyle.value);
+        break;
+    }
+  }
+
+  private handleMenuKey(menu: Menu, key: Key): void {
+    if (key.kind !== "key") return;
+    if (key.name === "ctrl-c") {
+      this.requestExit({ code: EXIT_SIGINT }); // an idle open menu exits like an idle prompt
+      return;
+    }
+    const layout = computeLayout(this.model.size);
+    const action = menu.handle(key.name, layout === undefined ? 1 : menuVisible(layout));
+    if (action === "cancel") {
+      this.model.menu = undefined;
+    } else if (action === "select") {
+      this.model.menu = undefined;
+      this.selectMenuItem(menu);
+    }
+  }
+
+  private selectMenuItem(menu: Menu): void {
+    const item = menu.selected;
+    const { provider, selection } = this.workspace;
+    switch (menu.kind) {
+      case "provider": {
+        const target = item.id === "openai" || item.id === "ollama" ? item.id : undefined;
+        if (target !== undefined && target !== selection.provider) this.startSwitch({ provider: target }, `Checking ${item.label}`);
+        break;
+      }
+      case "model":
+        if (item.id !== selection.model) this.startSwitch({ provider: provider.id, model: item.id }, "Checking model settings");
+        break;
+      case "reasoning": {
+        const value = reasoningValueOf(item.id);
+        const capabilities = this.menuCapabilities;
+        if (value === undefined || capabilities === undefined) break;
+        const change = this.workspace.chooseReasoning(capabilities, value);
+        if (change.changed) {
+          this.append("info", `Reasoning for ${selection.model}: ${reasoningChoiceLabel(item.id)}. Applies from the next message.`);
+          this.persistChange(change.save);
+        }
+        break;
+      }
+      case "max-tokens":
+        if (item.id === CUSTOM_ID) this.startPrompt(this.menuCapabilities?.maxOutputTokensLimit);
+        else this.applyMaxTokens(item.id === "default" ? null : BigInt(item.id));
+        break;
+      case "style": {
+        const style: AnswerStyle | undefined = ANSWER_STYLES.find((candidate) => candidate === item.id);
+        if (style === undefined) break;
+        const change = this.workspace.chooseAnswerStyle(style);
+        if (change.changed) {
+          this.append("info", `Answer style: ${item.label}. Applies from the next message.`);
+          this.persistChange(change.save);
+        }
+        break;
+      }
+    }
+  }
+
+  private applyMaxTokens(value: bigint | null): void {
+    const capabilities = this.menuCapabilities;
+    if (capabilities === undefined) return;
+    const { selection } = this.workspace;
+    const change = this.workspace.chooseMaxOutputTokens(capabilities, value);
+    if (!change.changed) return;
+    this.append("info", `Max output tokens for ${selection.model}: ${value === null ? "model default" : value.toString(10)}. Applies from the next message.`);
+    this.persistChange(change.save);
+  }
+
+  /** The runtime choice is already effective; the write is awaited (and a failure only warns). */
+  private persistChange(save: Promise<string | undefined> | undefined): void {
+    if (save === undefined) return;
+    this.work(async () => {
+      const failure = await save;
+      if (failure !== undefined) {
+        this.append("error", `Warning: ${failure}`);
+        this.model.status = warning("Settings not saved");
+      }
+    });
+  }
+
+  // ----- the custom max-output-tokens prompt -----
+
+  private startPrompt(limit: number | undefined): void {
+    const { editor } = this.model;
+    this.model.prompt = { model: this.workspace.selection.model, limit, savedText: editor.text, savedCursor: editor.cursor };
+    editor.clear();
+    this.append("info", `Type the max output tokens${limit === undefined ? "" : ` (1-${String(limit)})`} and press Enter; Esc cancels.`);
+  }
+
+  private endPrompt(): void {
+    const { prompt, editor } = this.model;
+    if (prompt === undefined) return;
+    this.model.prompt = undefined;
+    editor.restore(prompt.savedText, prompt.savedCursor);
+  }
+
+  private cancelPrompt(): void {
+    this.endPrompt();
+    this.append("info", "Max output tokens unchanged.");
+  }
+
+  private submitPrompt(text: string): void {
+    const { prompt, editor } = this.model;
+    if (prompt === undefined) return;
+    editor.clear();
+    const parsed = parseTokenInput(text, prompt.limit, prompt.model);
+    if (!parsed.ok) {
+      this.append("error", parsed.message); // the prompt stays open, nothing changed
+      return;
+    }
+    this.endPrompt();
+    this.applyMaxTokens(parsed.value);
+  }
+
+  // ----- checks: asynchronous, cancellable, never mutating before their result is accepted -----
+
+  private startCheck<T>(
+    label: string,
+    work: (signal: AbortSignal, progress: (label: string) => void) => Promise<T>,
+    done: (value: T) => Promise<void> | void,
+  ): void {
+    const op: CheckOp = { abort: new AbortController(), retired: false };
+    this.check = op;
+    this.phase = "checking";
+    this.model.checking = label;
+    const progress = (next: string): void => {
+      if (op.retired || this.exiting()) return;
+      this.model.checking = next;
+      this.requestDraw(false);
+    };
+    this.requestDraw(true);
+    this.inflight = this.runCheck(op, work, done, progress).then(undefined, (error: unknown) => { this.fail(error); });
+  }
+
+  private async runCheck<T>(
+    op: CheckOp,
+    work: (signal: AbortSignal, progress: (label: string) => void) => Promise<T>,
+    done: (value: T) => Promise<void> | void,
+    progress: (label: string) => void,
+  ): Promise<void> {
+    const settled = await this.settleBounded(Promise.resolve().then(() => work(op.abort.signal, progress)), op.abort.signal);
+    // No await from this identity check to the end of `done`'s synchronous part: a retired check applies nothing.
+    if (this.check === op) this.check = undefined;
+    this.model.checking = undefined;
+    if (op.retired || this.exiting() || settled.kind === "stuck") {
+      this.endCancelledCheck(settled.kind === "stuck");
+      return;
+    }
+    if (settled.kind === "error") {
+      this.phase = "idle";
+      this.checkFailed(settled.error);
+      this.requestDraw(true);
+      return;
+    }
+    this.phase = "idle";
+    const writing = done(settled.value);
+    this.requestDraw(true);
+    if (writing === undefined) return;
+    this.phase = "working";
+    try {
+      await writing;
+    } finally {
+      this.phase = "idle";
+      this.refreshStats();
+      this.requestDraw(true);
+    }
+  }
+
+  private cancelCheck(op: CheckOp): void {
+    this.retireCheck(op);
+    this.phase = "cancelling";
+    this.append("error", "Cancelled.");
+    this.model.status = { state: "CANCELLED", parts: [] };
+    this.model.afterTransient = undefined;
+  }
+
+  /** Retires first, then aborts: nothing of this check is applied any more. */
+  private retireCheck(op: CheckOp): void {
+    op.retired = true;
+    this.model.checking = undefined;
+    op.abort.abort();
+  }
+
+  private endCancelledCheck(stuck: boolean): void {
+    if (stuck) {
+      this.stuck = true;
+      this.phase = "idle";
+      this.requestExit({ code: EXIT_SIGINT });
+      return;
+    }
+    if (this.phase === "cancelling" || this.phase === "checking") this.phase = "idle";
+    this.requestDraw(true);
+  }
+
+  private checkFailed(error: unknown): void {
+    if (error instanceof SwitchRefusal) {
+      this.append("error", error.message);
+    } else if (error instanceof ProviderError || error instanceof SettingsError) {
+      this.append("error", `Error: ${error.message}`);
+      this.model.status = { state: "ERROR", parts: [error.message] };
+      this.model.afterTransient = undefined;
+    } else if (isAbortError(error)) {
+      this.append("error", "Error: The request was aborted.");
+    } else {
+      throw error; // unexpected: the fixed internal-error handling
+    }
+  }
+
+  // ----- switching provider or model -----
+
+  private startSwitch(target: { readonly provider: "openai" | "ollama"; readonly model?: string }, label: string): void {
+    this.startCheck(label, (signal, progress) => this.workspace.prepareSwitch(target, signal, progress), (prepared) => this.applySwitch(prepared));
+  }
+
+  /** Accepts the prepared switch (synchronously) and shows the target; the storage writes it started are awaited. */
+  private applySwitch(prepared: PreparedSwitch): Promise<void> {
+    const result = this.workspace.accept(prepared);
+    this.model.clearEntries();
+    this.model.confirmingCleanup = false;
+    for (const message of result.session.snapshot().messages) this.model.add(message.role === "user" ? "user" : "ai", message.content);
+    this.model.add("info", result.notice);
+    for (const notice of prepared.notices) this.model.add("info", notice);
+    for (const message of prepared.warnings) this.model.add("error", `Warning: ${message}`);
+    this.model.scroll = 0;
+    this.model.status = READY;
+    this.model.afterTransient = undefined;
+    this.refreshStats();
+    return result.writes.then((warnings) => {
+      for (const message of warnings) this.append("error", `Warning: ${message}`);
+      if (warnings.length > 0) this.model.status = warning("Conversation not saved");
+    });
+  }
+
   // ----- entries and screen -----
 
   private populate(): void {
-    const { session, warnings } = this.options;
+    const { warnings } = this.options;
+    const { session } = this.workspace;
     const snapshot = session.snapshot();
     for (const message of snapshot.messages) this.model.add(message.role === "user" ? "user" : "ai", message.content);
     for (const message of warnings) this.model.add("error", `Warning: ${message}`);
@@ -801,7 +1132,7 @@ export class TuiController {
   }
 
   private refreshStats(): void {
-    this.model.stats = panelStats(this.options.session.snapshot().requests);
+    this.model.stats = panelStats(this.workspace.session.snapshot().requests);
   }
 
   // ----- drawing: one frame at a time, coalesced, never more than one write pending -----
@@ -831,7 +1162,7 @@ export class TuiController {
   private async pump(): Promise<void> {
     while (this.dirty && !this.disposed) {
       this.dirty = false;
-      const frame = renderFrame(this.model, { title: this.options.title, settings: this.options.settings, now: this.options.timers.now() });
+      const frame = renderFrame(this.model, { title: this.options.title, settings: this.workspace.settings, now: this.options.timers.now() });
       try {
         await this.options.terminal.draw(frame);
       } catch (error: unknown) {

@@ -61,6 +61,7 @@ const COLORS: Readonly<Record<Style, string>> = {
   info: "0;32;40",
   error: "0;1;31;40",
   waiting: "0;1;33;40",
+  selected: "0;7;37;40",
 };
 
 const MONOCHROME: Readonly<Record<Style, string>> = {
@@ -71,6 +72,7 @@ const MONOCHROME: Readonly<Record<Style, string>> = {
   info: "0",
   error: "0;1",
   waiting: "0;7",
+  selected: "0;7",
 };
 
 export class AnsiTerminal implements Terminal {
