@@ -1,6 +1,6 @@
 # Architecture
 
-Status: `0.3.0-dev` (the fullscreen chat foundation, Task 008, and its menus with provider/model switching and saved preferences, Task 009, are implemented; the `0.2.0` milestone — plain chat, history, streaming — was completed after the owner smoke tests). The completed CLI Foundation (`0.1.0`: non-streaming OpenAI and Ollama one-shot) is behavior-preserved; the plain chat with persistent history and read-only saved settings is connected (Task 006) and `--stream` is implemented for both providers and both front ends (Task 007). No tag or release has been created or published.
+Status: `0.3.0` (the TUI milestone is complete after the owner smoke tests: the fullscreen chat, Task 008, and its menus with provider/model switching and saved preferences, Task 009; pricing remains pending; the `0.2.0` milestone — plain chat, history, streaming — was completed after the owner smoke tests). The completed CLI Foundation (`0.1.0`: non-streaming OpenAI and Ollama one-shot) is behavior-preserved; the plain chat with persistent history and read-only saved settings is connected (Task 006) and `--stream` is implemented for both providers and both front ends (Task 007). No tag or release has been created or published.
 
 ## CLI composition
 
@@ -157,7 +157,7 @@ Layers (dependencies point downward; nothing below knows the layers above):
 | Completed CLI Foundation (OpenAI + Ollama non-streaming) | 0.1.0 (done) |
 | Work on chat/history/streaming | 0.2.0-dev (done) |
 | Completed interactive chat milestone | 0.2.0 (done) |
-| TUI development / completed TUI | 0.3.0-dev (current) / 0.3.0 |
+| TUI development / completed TUI | 0.3.0-dev (done) / 0.3.0 (current; pricing pending) |
 | Full parity development / completed milestone | 0.4.0-dev / 0.4.0 |
 
 Patch releases of a completed milestone (0.1.x) require owner approval.

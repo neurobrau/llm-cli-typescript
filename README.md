@@ -1,6 +1,6 @@
 # NeuroBräu TypeScript
 
-TypeScript edition of the NeuroBräu LLM CLI. The current version is `0.3.0-dev` (work toward the fullscreen chat milestone); the completed milestones were `0.1.0` (CLI Foundation) and `0.2.0` (interactive chat, history, streaming). It can send **one one-shot prompt** to **OpenAI** (Responses API, official `openai` SDK 7.45.0) or to a **local Ollama server** (native HTTP API, no extra dependency) and print the answer, and, without a prompt, it runs a **fullscreen DOS-style chat** on a supported terminal (xterm, screen, tmux and rxvt families; see `docs/tui.md`) or, otherwise, a **line-oriented chat** (`YOU >` / `AI >`) on the same providers that restores and saves conversations, applies saved settings and understands `/help`, `/reset`, `/cleanup`, `/usage` and `/exit`. With `--stream` the answer is printed as it arrives, in both modes (real incremental streaming from OpenAI Responses and native Ollama). The fullscreen chat has the F2 model, F3 provider, F4 reasoning, F5 max-output-tokens and F6 answer-style menus: every provider/model keeps its own conversation and usage, and confirmed F4/F5/F6 choices are saved in `settings.json`. There is no pricing yet (the cost field says `unavailable`). Conversation, `active.json`, settings and usage-record JSON follow the Python reference formats (`docs/storage.md`). No Git tag or release exists for any version.
+TypeScript edition of the NeuroBräu LLM CLI. The current version is `0.3.0` (the completed TUI milestone); the earlier completed milestones were `0.1.0` (CLI Foundation) and `0.2.0` (interactive chat, history, streaming). Pricing and cost estimates are still pending. It can send **one one-shot prompt** to **OpenAI** (Responses API, official `openai` SDK 7.45.0) or to a **local Ollama server** (native HTTP API, no extra dependency) and print the answer, and, without a prompt, it runs a **fullscreen DOS-style chat** on a supported terminal (xterm, screen, tmux and rxvt families; see `docs/tui.md`) or, otherwise, a **line-oriented chat** (`YOU >` / `AI >`) on the same providers that restores and saves conversations, applies saved settings and understands `/help`, `/reset`, `/cleanup`, `/usage` and `/exit`. With `--stream` the answer is printed as it arrives, in both modes (real incremental streaming from OpenAI Responses and native Ollama). The fullscreen chat has the F2 model, F3 provider, F4 reasoning, F5 max-output-tokens and F6 answer-style menus: every provider/model keeps its own conversation and usage, and confirmed F4/F5/F6 choices are saved in `settings.json`. There is no pricing yet (the cost field says `unavailable`). Conversation, `active.json`, settings and usage-record JSON follow the Python reference formats (`docs/storage.md`). No Git tag or release exists for any version.
 
 ## Prerequisites
 
@@ -21,7 +21,7 @@ npm run build
 ```sh
 node dist/cli.js                    # chat: fullscreen on a capable terminal, else plain (continues the last conversation)
 node dist/cli.js --help             # or -h
-node dist/cli.js --version          # NeuroBräu TypeScript CLI 0.3.0-dev
+node dist/cli.js --version          # NeuroBräu TypeScript CLI 0.3.0
 export OPENAI_API_KEY=...           # read only when a prompt is sent
 node dist/cli.js "What is a neural network?"
 node dist/cli.js --provider ollama "What is a neural network?"   # first local model, no key
@@ -241,7 +241,7 @@ Tests include unit tests, runner tests with injected writers, and integration te
 
 ## Planned milestones
 
-Pricing and cost estimates come in a later task (OpenAI and Ollama one-shot, the plain chat with history, `--stream`, the fullscreen chat and its menus, provider/model switching and saved preferences are implemented). Version plan: `0.1.0` completed CLI Foundation; `0.2.0` completed chat/history/streaming; `0.3.0-dev` (current) while the TUI is built, `0.3.0` when it is complete; `0.4.0-dev`/`0.4.0` for full parity. See `docs/architecture.md` and `docs/parity.md`.
+Pricing and cost estimates come in a later task (OpenAI and Ollama one-shot, the plain chat with history, `--stream`, the fullscreen chat and its menus, provider/model switching and saved preferences are implemented). Version plan: `0.1.0` completed CLI Foundation; `0.2.0` completed chat/history/streaming; `0.3.0` (current) completed TUI (menus, switching, saved preferences; pricing pending); `0.4.0-dev`/`0.4.0` for full parity. See `docs/architecture.md` and `docs/parity.md`.
 
 ## Working documents
 

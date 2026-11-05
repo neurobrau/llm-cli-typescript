@@ -2,14 +2,14 @@
 
 ## Current scope and limitations
 
-`0.3.0-dev` (the completed `0.1.0` and `0.2.0` behavior is unchanged) implements `-h`/`--help`, `--version`, a one-shot prompt for OpenAI and Ollama (`--provider openai|ollama`), the chat with persistent history and read-only saved settings in two front ends — the fullscreen DOS-style chat on supported terminals and the line-oriented chat (`--plain`, pipes, other terminals) — `--no-history`, `--transcript-on-exit` (fullscreen only) and `--stream` for both (Tasks 007, 008). The fullscreen chat also has the F2–F6 menus, provider/model switching with independent conversations and the saved-preference writes (Task 009). **Not implemented:** pricing and cost estimates (spec section 15), model-discovery commands. Pricing parity and release readiness are not claimed. Exit codes 1-8, 130 and 141 are produced for the one-shot path.
+`0.3.0` (the completed TUI milestone; the completed `0.1.0` and `0.2.0` behavior is unchanged) implements `-h`/`--help`, `--version`, a one-shot prompt for OpenAI and Ollama (`--provider openai|ollama`), the chat with persistent history and read-only saved settings in two front ends — the fullscreen DOS-style chat on supported terminals and the line-oriented chat (`--plain`, pipes, other terminals) — `--no-history`, `--transcript-on-exit` (fullscreen only) and `--stream` for both (Tasks 007, 008). The fullscreen chat also has the F2–F6 menus, provider/model switching with independent conversations and the saved-preference writes (Task 009). **Not implemented:** pricing and cost estimates (spec section 15), model-discovery commands. Pricing parity and release readiness are not claimed. Exit codes 1-8, 130 and 141 are produced for the one-shot path.
 
 ## References
 
 - Python (primary behavior reference): `0a6d045c022b850371a1c51a1df30f11d9d4c60e`
 - Go: `b064decc66cad7d9656488bdf7749650b52cf309`
 
-Both are read-only. The Go version constant (`0.4.0-dev`) and the Python version are independent of this edition's `0.2.0` (version plan in `docs/architecture.md`).
+Both are read-only. The Go version constant (`0.4.0-dev`) and the Python version are independent of this edition's `0.3.0` (version plan in `docs/architecture.md`).
 
 ## Settings resolution (Task 002, internal)
 
