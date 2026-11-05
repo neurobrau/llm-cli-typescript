@@ -169,7 +169,7 @@ export class TuiController {
       });
     } catch (error: unknown) {
       this.disposed = true;
-      await terminal.close();
+      await this.boundedClose(terminal);
       return { code: EXIT_FAILURE, diagnostic: error instanceof TerminalError ? error.message : "could not initialize the terminal" };
     }
     let result: TuiResult;
@@ -183,9 +183,23 @@ export class TuiController {
     } finally {
       this.dispose();
       await this.settleDrawing();
-      await terminal.close();
+      await this.boundedClose(terminal);
     }
     return result;
+  }
+
+  /**
+   * Restores the terminal, waiting for its flushed output at most the cleanup bound. The adapter
+   * restores raw input and removes its listeners synchronously; only the final write can stall.
+   */
+  private async boundedClose(terminal: Terminal): Promise<void> {
+    await new Promise<void>((resolve) => {
+      const timer = this.options.timers.after(this.options.cleanupTimeoutMs, resolve);
+      terminal.close().then(
+        () => { timer.cancel(); resolve(); },
+        () => { timer.cancel(); resolve(); }, // restoring is best effort; a failure is not reported twice
+      );
+    });
   }
 
   // ----- external events -----
@@ -535,7 +549,7 @@ export class TuiController {
       request.abort.signal,
       (delta) => this.onDelta(request, delta),
       this.options.cleanupTimeoutMs,
-      () => { this.onReasoning(request); },
+      () => this.onReasoning(request),
     );
     // No await from the identity check to the commit inside `finishStream`.
     const saving = this.finishStream(request, consumed);
@@ -583,18 +597,41 @@ export class TuiController {
     request.text += delta;
     this.showAnswer(request);
     this.requestDraw(false);
-    this.sinceYield += 1;
-    if (this.sinceYield >= EVENTS_PER_YIELD) {
-      this.sinceYield = 0;
-      await this.flushDraws();
-      await new Promise<void>((resolve) => { setImmediate(resolve); });
-    }
+    await this.budget(request);
   }
 
-  private onReasoning(request: ActiveRequest): void {
+  private async onReasoning(request: ActiveRequest): Promise<void> {
     if (request.retired || this.exit !== undefined) return;
     if (this.model.live !== undefined) this.model.live.thinking = true; // status only; the text never reaches us
     this.requestDraw(false);
+    await this.budget(request);
+  }
+
+  /**
+   * Every provider event, text or reasoning, spends the same budget. After EVENTS_PER_YIELD of them the
+   * loop is yielded to so queued keys, signals, timers and resizes run, and the frame in flight is awaited -
+   * but never past a cancellation: a stalled terminal must not keep a retired request from being closed.
+   */
+  private async budget(request: ActiveRequest): Promise<void> {
+    this.sinceYield += 1;
+    if (this.sinceYield < EVENTS_PER_YIELD) return;
+    this.sinceYield = 0;
+    await this.untilRetired(request, this.flushDraws());
+    await new Promise<void>((resolve) => { setImmediate(resolve); });
+  }
+
+  /** Resolves when `work` settles or the request is retired, whichever comes first. */
+  private untilRetired(request: ActiveRequest, work: Promise<void>): Promise<void> {
+    const { signal } = request.abort;
+    return new Promise<void>((resolve) => {
+      const release = (): void => {
+        signal.removeEventListener("abort", release);
+        resolve();
+      };
+      if (signal.aborted) release();
+      else signal.addEventListener("abort", release, { once: true });
+      void work.then(release, release);
+    });
   }
 
   /** The answer entry grows in place; a reader who scrolled up keeps their view. */

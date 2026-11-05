@@ -117,6 +117,8 @@ export class FakeTerminal implements Terminal {
   drawError: Error | undefined;
   /** While set, `draw` does not complete: terminal output backpressure. */
   drawGate: Promise<void> | undefined;
+  /** While set, `close` does not complete: a restoring write that never flushes. */
+  closeGate: Promise<void> | undefined;
   closeCount = 0;
   openCount = 0;
   drawsStarted = 0;
@@ -155,7 +157,7 @@ export class FakeTerminal implements Terminal {
     this.closeCount += 1;
     if (this.closeCount === 1) this.log.push("close");
     this.handlers = undefined;
-    return Promise.resolve();
+    return this.closeGate ?? Promise.resolve();
   }
 
   // ----- driving -----
@@ -350,4 +352,19 @@ export async function startTui(options: TuiOptions = {}): Promise<TuiSession> {
     },
     screen: () => term.text(),
   };
+}
+
+/**
+ * Waits for run() to finish while the injected clock advances, so bounds that run on the injected
+ * timers (drawing, restoring) fire. Fails instead of hanging when the run never ends.
+ */
+export async function finishWithClock(session: TuiSession, stepMs = 50, steps = 200): Promise<ChatRun> {
+  let done: ChatRun | undefined;
+  void session.result.then((value) => { done = value; });
+  for (let i = 0; i < steps && done === undefined; i += 1) {
+    session.timers.advance(stepMs);
+    await settleAll(3);
+  }
+  if (done === undefined) throw new Error("run() did not finish although the clock advanced");
+  return done;
 }

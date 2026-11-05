@@ -43,9 +43,11 @@ class FakeOutput extends EventEmitter implements TerminalOutput {
   rows = 25;
   readonly chunks: string[] = [];
   failWith: Error | undefined;
+  /** While set, writes are accepted but never reported as flushed. */
+  hold = false;
   write(text: string, callback: (error?: Error | null) => void): boolean {
     this.chunks.push(text);
-    callback(this.failWith);
+    if (!this.hold) callback(this.failWith);
     return true;
   }
   get text(): string {
@@ -150,6 +152,23 @@ void describe("AnsiTerminal: lifecycle", () => {
     assert.deepEqual(input.raw, [true, false]);
     assert.equal(input.listenerCount("data"), 0);
     assert.equal(input.listenerCount("end"), 0);
+  });
+
+  void it("a restoring write that never flushes still restores raw input and removes every listener synchronously", async () => {
+    const input = new FakeInput();
+    const output = new FakeOutput();
+    const terminal = new AnsiTerminal({ input, output, color: true });
+    terminal.open(handlers());
+    output.hold = true;
+    const closing = terminal.close();
+    assert.deepEqual(input.raw, [true, false]);
+    assert.equal(input.readableFlowing, false);
+    assert.equal(input.listenerCount("data"), 0);
+    assert.equal(output.listenerCount("resize"), 0);
+    assert.ok(output.text.endsWith(LEAVE), "the restoring sequence was handed to the output");
+    const outcome = await Promise.race([closing.then(() => "flushed"), settleAll(5).then(() => "pending")]);
+    assert.equal(outcome, "pending");
+    assert.equal(terminal.close(), closing, "closing again returns the same pending restore");
   });
 
   void it("close survives a closed output and still restores raw mode", async () => {

@@ -6,7 +6,7 @@ import { createAbortError } from "../src/domain/errors.js";
 import type { StreamEvent } from "../src/domain/generation.js";
 import { ControlledStream, MemoryHistory, ScriptedProvider, answer, completed, completedEvent, deaf, gated, streamOf, text } from "./helpers/chat.js";
 import { deferred } from "./helpers/deferred.js";
-import { KEYS, startTui, until, settleAll } from "./helpers/tui.js";
+import { KEYS, finishWithClock, startTui, until, settleAll } from "./helpers/tui.js";
 import type { TuiSession } from "./helpers/tui.js";
 
 const epipe = (): Error => Object.assign(new Error("write EPIPE"), { code: "EPIPE" });
@@ -488,5 +488,151 @@ void describe("fullscreen: scrolling", () => {
     assert.ok(session.term.inputLine().includes("YOU > my draft"));
     await session.key(KEYS.ctrlU);
     assert.equal(await quit(session), 0);
+  });
+});
+
+void describe("fullscreen: shutdown and cancellation with stalled output", () => {
+  /** A streaming request whose consumer is blocked at the 256-event drawing wait. */
+  async function stalled(): Promise<{ session: TuiSession; stream: ControlledStream; release: () => void }> {
+    const provider = new ScriptedProvider("ollama");
+    const stream = new ControlledStream();
+    provider.pushStream(stream.handler);
+    const session = await startTui({ provider, argv: ["--stream"], deps: { cleanupTimeoutMs: 30 } });
+    await submit(session, "go");
+    const stall = deferred();
+    session.term.drawGate = stall.promise;
+    stream.push(...Array.from({ length: 300 }, () => text("w ")));
+    await settleAll(40);
+    assert.ok(stream.pulls >= 256 && stream.pulls <= 258, `blocked at the budget, pulled ${String(stream.pulls)}`);
+    assert.equal(stream.returned, false);
+    return { session, stream, release: stall.resolve };
+  }
+
+  function assertShutDown(session: TuiSession, stream: ControlledStream): void {
+    assert.equal(stream.returned, true, "the stream was closed");
+    assert.equal(session.history.saved.length, 0, "abandoned work is never committed");
+    assert.equal(session.term.closeCount, 1);
+    assert.ok(!session.term.log.includes("draw-after-close"));
+    assert.equal(session.signals.active, 0);
+    assert.equal(session.timers.pending, 0);
+  }
+
+  void it("Ctrl+C reaches the stream cleanup while the text observer waits for the stalled drawing", async () => {
+    const { session, stream, release } = await stalled();
+    session.term.feed(KEYS.ctrlC);
+    await until(() => stream.returned, "iterator.return() called");
+    await settleAll();
+    release(); // the screen was stalled, not the program: once frames flow the state is current
+    await until(() => session.term.status().split(" | ")[0] === "CANCELLED", "CANCELLED shown");
+    session.term.feed(KEYS.ctrlU);
+    session.term.feed(KEYS.ctrlD);
+    const done = await finishWithClock(session);
+    assert.equal(done.code, 0);
+    assertShutDown(session, stream);
+  });
+
+  void it("/exit does the same", async () => {
+    const { session, stream } = await stalled();
+    session.term.feed("/exit\r");
+    await until(() => stream.returned, "iterator.return() called");
+    const done = await finishWithClock(session);
+    assert.equal(done.code, 0);
+    assertShutDown(session, stream);
+  });
+
+  void it("SIGTERM finishes within the bounds: stream closed, terminal restored, run() settled", async () => {
+    const { session, stream } = await stalled();
+    session.signals.fire("SIGTERM");
+    await until(() => stream.returned, "iterator.return() called");
+    const done = await finishWithClock(session);
+    assert.equal(done.code, 143);
+    assertShutDown(session, stream);
+  });
+
+  void it("releasing the stalled frame after the restore starts no further drawing", async () => {
+    const { session, stream, release } = await stalled();
+    session.signals.fire("SIGTERM");
+    await finishWithClock(session);
+    const started = session.term.drawsStarted;
+    release();
+    await settleAll(10);
+    assert.equal(session.term.drawsStarted, started);
+    assert.equal(stream.returned, true);
+    assert.equal(session.term.closeCount, 1);
+  });
+
+  void it("a restoring output callback that never completes does not hang the exit", async () => {
+    const session = await startTui();
+    session.term.closeGate = new Promise<void>(() => undefined);
+    session.term.feed(KEYS.ctrlD);
+    const done = await finishWithClock(session);
+    assert.equal(done.code, 0);
+    assert.equal(session.term.closeCount, 1);
+    assert.equal(session.signals.active, 0);
+    assert.equal(session.timers.pending, 0);
+  });
+});
+
+void describe("fullscreen: reasoning events spend the same fairness budget", () => {
+  const count = { next: 0 };
+  const reasoningStream = (total: number): Parameters<ScriptedProvider["pushStream"]>[0] => (_request, signal) => ({
+    [Symbol.asyncIterator]: (): AsyncIterator<StreamEvent> => ({
+      next: async () => {
+        await Promise.resolve();
+        if (signal.aborted) throw createAbortError();
+        count.next += 1;
+        return count.next <= total
+          ? { done: false, value: { kind: "reasoning", text: "SECRET THOUGHT" } }
+          : { done: false, value: completedEvent("answer") };
+      },
+      return: () => Promise.resolve({ done: true, value: undefined }),
+    }),
+  });
+
+  void it("a termination queued before the request runs long before 10,000 reasoning events are drained, and nothing is committed", async () => {
+    count.next = 0;
+    const provider = new ScriptedProvider("ollama");
+    provider.pushStream(reasoningStream(10_000));
+    const session = await startTui({ provider, argv: ["--stream"] });
+    session.term.feed("go\r");
+    setImmediate(() => { session.signals.fire("SIGTERM"); });
+    const done = await session.result;
+    assert.equal(done.code, 143);
+    assert.ok(count.next > 0 && count.next < 1000, `consumed ${String(count.next)} events before the termination ran`);
+    assert.equal(session.history.saved.length, 0);
+    assert.ok(!session.term.frames.some((frame) => frame.chars.some((row) => row.join("").includes("SECRET"))));
+  });
+
+  void it("a queued Ctrl+C cancels the reasoning-only request before it completes; the next request works", async () => {
+    count.next = 0;
+    const provider = new ScriptedProvider("ollama");
+    provider.pushStream(reasoningStream(10_000));
+    const session = await startTui({ provider, argv: ["--stream"] });
+    session.term.feed("go\r");
+    setImmediate(() => { session.term.feed(KEYS.ctrlC); });
+    await until(() => session.term.status().split(" | ")[0] === "CANCELLED", "CANCELLED");
+    assert.ok(count.next < 1000, `consumed ${String(count.next)} events`);
+    assert.equal(session.history.saved.length, 0);
+    await submit(session, "again");
+    await until(() => provider.streamCalls === 2, "second request");
+    assert.deepEqual(provider.sent(1), ["user: again"]);
+    session.term.feed(KEYS.ctrlC);
+    await session.result;
+  });
+
+  void it("input, resize and status updates stay responsive during a long reasoning phase", async () => {
+    count.next = 0;
+    const provider = new ScriptedProvider("ollama");
+    provider.pushStream(reasoningStream(3000));
+    const session = await startTui({ provider, argv: ["--stream"] });
+    session.term.feed("go\r");
+    await until(() => session.term.status().includes("Thinking") || session.term.status().startsWith("DONE"), "thinking status");
+    session.term.resize(30, 100);
+    await until(() => session.term.lines().length === 30, "resized frame");
+    await until(() => session.history.saved.length === 1, "finished");
+    assert.ok(!session.term.text().includes("SECRET"));
+    await settleAll();
+    session.term.feed(KEYS.ctrlD);
+    assert.equal((await session.result).code, 0);
   });
 });
