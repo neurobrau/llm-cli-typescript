@@ -156,12 +156,12 @@ void describe("settings panel", () => {
     const stats = panelStats([usage({ inputTokens: 10n, outputTokens: 20n, totalTokens: 30n }), usage({ inputTokens: 7n, outputTokens: 10n, totalTokens: 17n })]);
     assert.deepEqual(
       settingsPanelRows(SETTINGS, stats).map((row) => row.text),
-      ["F2 MODEL", " qwen3.5:4b", "F3 PROVIDER", " Ollama", "F4 REASONING", " off", "F5 MAX TOKENS", " default", "F6 ANSWER STYLE", " normal", "TOKENS", " in 17 out 30", " total 47", " context 7", "COST (EST.)", " unavailable"],
+      ["F2 MODEL", " qwen3.5:4b", "F3 PROVIDER", " Ollama", "F4 REASONING", " off", "F5 MAX TOKENS", " default", "F6 ANSWER STYLE", " normal", "TOKENS", " in 17 out 30", " total 47", " context 7", "COST (EST.)", " $0 (local)"],
     );
   });
 
   void it("shows - without usage, ? for never-reported counts and zero for reported zero", () => {
-    assert.deepEqual(settingsPanelRows(SETTINGS, panelStats([])).slice(10).map((row) => row.text), ["TOKENS", " -", "COST (EST.)", " unavailable"]);
+    assert.deepEqual(settingsPanelRows(SETTINGS, panelStats([])).slice(10).map((row) => row.text), ["TOKENS", " -", "COST (EST.)", " -"]);
     const rows = settingsPanelRows(SETTINGS, panelStats([usage({ inputTokens: 0n })])).map((row) => row.text);
     assert.deepEqual(rows.slice(11, 14), [" in 0 out ?", " total ?", " context 0"]);
   });

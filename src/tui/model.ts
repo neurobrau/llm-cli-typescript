@@ -66,7 +66,7 @@ export class TuiModel {
   /** Label of the running discovery/preparation check, shown as `CONNECTING | <label>`. */
   checking: string | undefined;
   confirmingCleanup = false;
-  stats: PanelStats = { input: undefined, output: undefined, total: undefined, cached: undefined, reasoning: undefined, context: undefined, any: false };
+  stats: PanelStats = { input: undefined, output: undefined, total: undefined, cached: undefined, reasoning: undefined, context: undefined, cost: "-", any: false };
   size: Size;
   private nextId = 1;
 

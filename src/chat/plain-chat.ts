@@ -50,7 +50,7 @@ import {
 
 
 export interface PlainChatOptions {
-  /** First banner line, e.g. `NeuroBräu TypeScript CLI 0.3.0`. */
+  /** First banner line, e.g. `NeuroBräu TypeScript CLI 0.4.0-dev`. */
   readonly title: string;
   readonly session: ChatSession;
   readonly provider: Provider;

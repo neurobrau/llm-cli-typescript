@@ -42,7 +42,7 @@ export function helpText(persistent: boolean): string {
   /help     show this help
   /reset    ${reset}
   /cleanup  ${cleanup}
-  /usage    token usage of this conversation (cost estimates are not implemented yet)
+  /usage    token usage and ESTIMATED cost of this conversation
   /exit     ${exit}
 Backslash aliases also work: \\help, \\reset, \\cleanup, \\usage, \\exit.
 Press Ctrl+D (EOF) or Ctrl+C at the prompt to exit.

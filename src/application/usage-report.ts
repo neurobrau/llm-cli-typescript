@@ -1,9 +1,13 @@
 /**
- * Token-only conversation usage report (no prices; cost estimates are not
- * implemented yet). Every count field is summed on its own with bigint over
- * the records that reported it; a missing count is "not reported", never zero,
- * and a sum over only some of the requests says so.
+ * Conversation usage report: token counts plus the ESTIMATED cost. Every count
+ * field is summed on its own with bigint over the records that reported it; a
+ * missing count is "not reported", never zero, and a sum over only some of the
+ * requests says so. The cost comes from the pure pricing module and is never
+ * stored.
  */
+import { describeCost, totalCost } from "../pricing/index.js";
+import type { CostEstimate } from "../pricing/index.js";
+import { displayPath } from "../storage/fs/errors.js";
 import type { StoredUsageRecord } from "../storage/types.js";
 
 type CountField = "inputTokens" | "outputTokens" | "totalTokens" | "cachedInputTokens" | "cacheWriteTokens" | "reasoningTokens";
@@ -17,7 +21,16 @@ const FIELDS: readonly (readonly [CountField, string])[] = [
   ["reasoningTokens", "Reasoning tokens (part of output)"],
 ];
 
-export const NO_COST_NOTE = "Cost estimates are not implemented yet.";
+/**
+ * The long cost line. Notes can carry saved provider/model/tier names, so
+ * control characters are shown as escapes (identical for ordinary names).
+ */
+export function costLine(records: readonly StoredUsageRecord[]): string {
+  const cost = totalCost(records);
+  const safe: CostEstimate | undefined =
+    cost === undefined ? undefined : { ...cost, notes: cost.notes.map(displayPath) };
+  return describeCost(safe);
+}
 
 /** Base-10 with thousands separators, exact for any size. */
 export function groupDigits(value: bigint): string {
@@ -26,7 +39,7 @@ export function groupDigits(value: bigint): string {
 
 export function usageReport(records: readonly StoredUsageRecord[]): string {
   if (records.length === 0) {
-    return `Token usage: no API requests in this conversation yet.\n${NO_COST_NOTE}`;
+    return `Token usage: no API requests in this conversation yet.\n${costLine(records)}`;
   }
   const completed = records.filter((record) => record.status === "completed").length;
   const incomplete = records.length - completed;
@@ -48,7 +61,7 @@ export function usageReport(records: readonly StoredUsageRecord[]): string {
   if (incomplete > 0) {
     lines.push(`Includes ${String(incomplete)} incomplete answer(s): billed, but not saved as messages.`);
   }
-  lines.push(NO_COST_NOTE);
+  lines.push(costLine(records));
   return lines.join("\n");
 }
 

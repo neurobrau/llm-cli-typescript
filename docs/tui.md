@@ -1,6 +1,6 @@
 # Fullscreen chat (Tasks 008 and 009)
 
-The DOS-style fullscreen chat (the completed `0.3.0` TUI milestone; pricing is still pending). Reference: Python `docs/tui-spec.md` sections 1–10, 11 (restore/save/reset/cleanup), 14 (fullscreen streaming) and 16, at commit `0a6d045c022b850371a1c51a1df30f11d9d4c60e`; Go `internal/tui` at `b064decc66cad7d9656488bdf7749650b52cf309` as a reliability example. Task 009 adds the F2–F6 menus, provider/model switching with independent conversations, and saved preferences (sections 4b, 4c, 11 switching, 13 writes; Python `ui/menu.py`, `tui.py`, `preferences.py`, `session.py`, Go `internal/tui/{menu,controls,operation}.go` and their tests). Pricing (section 15) is **not** implemented.
+The DOS-style fullscreen chat (the completed `0.3.0` TUI milestone; `0.4.0-dev` adds the estimated cost). Reference: Python `docs/tui-spec.md` sections 1–10, 11 (restore/save/reset/cleanup), 14 (fullscreen streaming) and 16, at commit `0a6d045c022b850371a1c51a1df30f11d9d4c60e`; Go `internal/tui` at `b064decc66cad7d9656488bdf7749650b52cf309` as a reliability example. Task 009 adds the F2–F6 menus, provider/model switching with independent conversations, and saved preferences (sections 4b, 4c, 11 switching, 13 writes; Python `ui/menu.py`, `tui.py`, `preferences.py`, `session.py`, Go `internal/tui/{menu,controls,operation}.go` and their tests). Pricing (section 15) is **not** implemented.
 
 ## When it starts
 
@@ -21,7 +21,7 @@ Everything else (pipes, redirects, unknown `TERM`, `--plain`) runs the existing 
 
 The title is `NeuroBräu TypeScript CLI <package version>`. While scrolled up it reads `… - scrolled up N (PgDn)`; a long title gives way to that suffix.
 
-Panel (`src/tui/panel.ts`): model, provider, reasoning, max tokens and answer style, then **conversation totals** summed exactly with `bigint` over the stored usage records (`?` for a count no request reported, zero stays zero), `cached`/`reasoning` only when positive (they are parts of input/output and never added again), `context` = input of the latest completed request, and `COST (EST.)` always `unavailable` (no pricing catalog, no invented amounts). Abbreviation (`12.3k`, `4.56M`, `2G`) only when the exact text does not fit, with three significant digits, by integer arithmetic.
+Panel (`src/tui/panel.ts`): model, provider, reasoning, max tokens and answer style, then **conversation totals** summed exactly with `bigint` over the stored usage records (`?` for a count no request reported, zero stays zero), `cached`/`reasoning` only when positive (they are parts of input/output and never added again), `context` = input of the latest completed request, and `COST (EST.)` the short estimated cost of the current selection's records (`-` without records, `$0 (local)`, `$0.002165`, `~$…` qualified, `>=$…` partial, `unavailable`; `docs/pricing.md`), computed once per state refresh (restore, accepted request, switch, reset, cleanup), never per frame. Abbreviation (`12.3k`, `4.56M`, `2G`) only when the exact text does not fit, with three significant digits, by integer arithmetic.
 
 ## Text, controls and wrapping
 
@@ -45,7 +45,7 @@ Terminal controls: ESC and every other C0/C1 control (TAB/LF/CR are consumed by 
 
 xterm, rxvt, tmux and `SS3` forms of the arrows, Home/End, PgUp/PgDn, Delete and F1–F6 are decoded across arbitrary chunk boundaries (including split UTF-8). A lone Esc is dropped after about 25 ms; unsupported sequences are swallowed whole (the sequence buffer is bounded), so no raw bytes reach the draft and an escape sequence can never be submitted as a message.
 
-Commands: `/help`, `/usage` (token-only report, cost not implemented), `/reset`, `/cleanup` (the next submitted line is the answer and is never a message or command; only `yes` deletes), `/exit` and backslash aliases, case-insensitively. During a request `/help`, `/usage` and `/exit` work; other submissions are refused with the draft kept.
+Commands: `/help`, `/usage` (token report plus the estimated cost line, identical to the plain chat), `/reset`, `/cleanup` (the next submitted line is the answer and is never a message or command; only `yes` deletes), `/exit` and backslash aliases, case-insensitively. During a request `/help`, `/usage` and `/exit` work; other submissions are refused with the draft kept.
 
 ## Requests, status and cancellation
 

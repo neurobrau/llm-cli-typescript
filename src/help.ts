@@ -30,8 +30,8 @@ saves each completed exchange and applies saved settings: a fullscreen
 DOS-style interface on a supported terminal (xterm, screen, tmux, rxvt
 families), otherwise (or with --plain, or when input/output is not a
 terminal) a line-oriented chat (YOU > / AI >). With --stream the answer is
-printed as it arrives. Cost estimates and the F2-F6 settings menus
-(provider/model switching) are future work. OpenAI requires OPENAI_API_KEY
+printed as it arrives. /usage shows token usage and an ESTIMATED
+cost; the F2-F6 settings menus are in the fullscreen chat. OpenAI requires OPENAI_API_KEY
 in the environment. Ollama needs no key; OLLAMA_HOST selects the server (default
 http://127.0.0.1:11434).
 

@@ -47,7 +47,7 @@ void describe("fullscreen: baseline geometry, text roles and colors (docs/tui-sp
     assert.equal(lines[13], "|                                                         |  total 47          |");
     assert.equal(lines[14], "|                                                         |  context 17        |");
     assert.equal(lines[15], "|                                                         | COST (EST.)        |");
-    assert.equal(lines[16], "|                                                         |  unavailable       |");
+    assert.equal(lines[16], "|                                                         |  $0 (local)        |");
     assert.equal(lines[18], "|                                                         |                    |");
     assert.equal(lines[19], "+-[ Status ]----------------------------------------------+--------------------+");
     assert.equal(lines[20], `| ${"DONE | 7.17s total | load 0.20s | generation 1.88s | 15.96 tok/s".padEnd(76)} |`);
@@ -181,7 +181,7 @@ void describe("fullscreen: startup contents", () => {
     assert.ok(session.term.flat().includes("Restored conversation from 2026-"));
     assert.ok(session.term.flat().includes("(2 messages). Type /reset to start a new one."));
     const panel = session.term.lines().map((line) => line.slice(60, 78).trim());
-    assert.deepEqual(panel.slice(11, 17), ["TOKENS", "in 300 out 130", "total 150", "context 200", "COST (EST.)", "unavailable"]);
+    assert.deepEqual(panel.slice(11, 17), ["TOKENS", "in 300 out 130", "total 150", "context 200", "COST (EST.)", "$0 (local)"]);
     assert.equal(await quit(session), 0);
   });
 

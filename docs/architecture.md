@@ -1,6 +1,6 @@
 # Architecture
 
-Status: `0.3.0` (the TUI milestone is complete after the owner smoke tests: the fullscreen chat, Task 008, and its menus with provider/model switching and saved preferences, Task 009; pricing remains pending; the `0.2.0` milestone — plain chat, history, streaming — was completed after the owner smoke tests). The completed CLI Foundation (`0.1.0`: non-streaming OpenAI and Ollama one-shot) is behavior-preserved; the plain chat with persistent history and read-only saved settings is connected (Task 006) and `--stream` is implemented for both providers and both front ends (Task 007). No tag or release has been created or published.
+Status: `0.4.0-dev` (exact estimated API costs, Task 010: the pure `src/pricing/` module, `/usage` and the `COST (EST.)` panel, `docs/pricing.md`; not a release). The last completed milestone is `0.3.0` (the TUI milestone is complete after the owner smoke tests: the fullscreen chat, Task 008, and its menus with provider/model switching and saved preferences, Task 009; the `0.2.0` milestone — plain chat, history, streaming — was completed after the owner smoke tests). The completed CLI Foundation (`0.1.0`: non-streaming OpenAI and Ollama one-shot) is behavior-preserved; the plain chat with persistent history and read-only saved settings is connected (Task 006) and `--stream` is implemented for both providers and both front ends (Task 007). No tag or release has been created or published.
 
 ## CLI composition
 
@@ -128,7 +128,7 @@ Layers (dependencies point downward; nothing below knows the layers above):
 
 **Request lifecycle.** One request at a time. After the provider call returns, the loop checks `signal.aborted` and applies the commit in the same synchronous step, so a response that lost the race against an interrupt is discarded. Persistence then runs to completion before the answer is printed and before the chat can exit; an interrupt during it only requests the exit (130). After an interrupt the chat waits at most `cleanupTimeoutMs` for the provider to settle; a provider that ignores the abort ends the chat (130), and its late result can reach nothing because the commit happens in the loop. Lines that arrive meanwhile stay in the (paused, bounded) input and are processed in order; EOF never cancels an accepted request.
 
-**Not implemented in the plain chat:** switching providers/models in a session (fullscreen only), pricing.
+**Not implemented in the plain chat:** switching providers/models in a session (fullscreen only). Estimated costs appear in `/usage` (`src/pricing/`: bigint-only, pure, no I/O; computed from the stored usage records when the report or panel state is refreshed and never persisted).
 
 ## Streaming (Task 007)
 
@@ -157,8 +157,8 @@ Layers (dependencies point downward; nothing below knows the layers above):
 | Completed CLI Foundation (OpenAI + Ollama non-streaming) | 0.1.0 (done) |
 | Work on chat/history/streaming | 0.2.0-dev (done) |
 | Completed interactive chat milestone | 0.2.0 (done) |
-| TUI development / completed TUI | 0.3.0-dev (done) / 0.3.0 (current; pricing pending) |
-| Full parity development / completed milestone | 0.4.0-dev / 0.4.0 |
+| TUI development / completed TUI | 0.3.0-dev (done) / 0.3.0 (done) |
+| Cost estimates / full parity development / completed milestone | 0.4.0-dev (current) / 0.4.0 |
 
 Patch releases of a completed milestone (0.1.x) require owner approval.
 

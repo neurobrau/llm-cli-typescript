@@ -2,14 +2,14 @@
 
 ## Current scope and limitations
 
-`0.3.0` (the completed TUI milestone; the completed `0.1.0` and `0.2.0` behavior is unchanged) implements `-h`/`--help`, `--version`, a one-shot prompt for OpenAI and Ollama (`--provider openai|ollama`), the chat with persistent history and read-only saved settings in two front ends — the fullscreen DOS-style chat on supported terminals and the line-oriented chat (`--plain`, pipes, other terminals) — `--no-history`, `--transcript-on-exit` (fullscreen only) and `--stream` for both (Tasks 007, 008). The fullscreen chat also has the F2–F6 menus, provider/model switching with independent conversations and the saved-preference writes (Task 009). **Not implemented:** pricing and cost estimates (spec section 15), model-discovery commands. Pricing parity and release readiness are not claimed. Exit codes 1-8, 130 and 141 are produced for the one-shot path.
+`0.4.0-dev` (adds exact estimated costs on top of the completed `0.3.0` TUI milestone; the completed `0.1.0` and `0.2.0` behavior is unchanged) implements `-h`/`--help`, `--version`, a one-shot prompt for OpenAI and Ollama (`--provider openai|ollama`), the chat with persistent history and read-only saved settings in two front ends — the fullscreen DOS-style chat on supported terminals and the line-oriented chat (`--plain`, pipes, other terminals) — `--no-history`, `--transcript-on-exit` (fullscreen only) and `--stream` for both (Tasks 007, 008). The fullscreen chat also has the F2–F6 menus, provider/model switching with independent conversations and the saved-preference writes (Task 009). **Not implemented:** pricing and cost estimates (spec section 15), model-discovery commands. Pricing parity and release readiness are not claimed. Exit codes 1-8, 130 and 141 are produced for the one-shot path.
 
 ## References
 
 - Python (primary behavior reference): `0a6d045c022b850371a1c51a1df30f11d9d4c60e`
 - Go: `b064decc66cad7d9656488bdf7749650b52cf309`
 
-Both are read-only. The Go version constant (`0.4.0-dev`) and the Python version are independent of this edition's `0.3.0` (version plan in `docs/architecture.md`).
+Both are read-only. The Go version constant (`0.4.0-dev`) and the Python version are independent of this edition's `0.4.0-dev` (version plan in `docs/architecture.md`).
 
 ## Settings resolution (Task 002, internal)
 
@@ -67,7 +67,7 @@ Details in `docs/storage.md`. Intentional differences from the references: only 
 
 References: Python `session.py`, `chat.py`, `cli.py`, `usage.py`, `docs/tui-spec.md` §§1, 8, 9, 11, 13, 15, 16; Go `internal/session`, `internal/chat`, `internal/cli/interactive.go`. Kept: banner and labels, notices, command set and aliases, restore rules and active selection, save-after-completed-exchange, reset/cleanup semantics, incomplete-usage save policy, warnings on stderr, exit codes.
 
-- No fullscreen TUI: every interactive run is the plain chat, also on a terminal (`--plain` is accepted and redundant). Cost estimates are not implemented: `/usage` is token-only and says so (Python/Go print an estimated cost).
+- No fullscreen TUI: every interactive run is the plain chat, also on a terminal (`--plain` is accepted and redundant).
 - `--usage` also prints usage after incomplete replies (Go/Python only after completed ones).
 - `--plain`/`--no-history` with a prompt are rejected (exit 2); Python/Go silently ignore them.
 - Restore: conversations of unknown providers are skipped (Go) and never rewritten; a valid active selection without a conversation never falls back to an unrelated one; unknown-provider and invalid `active.json` are warnings.
@@ -101,7 +101,7 @@ References: Python `docs/tui-spec.md` §12/§14/§15/§16 and the Python/Go stre
 References: Python `docs/tui-spec.md` §1–10, 11, 14, 16 and `ui/tui.py`, `ui/status.py`; Go `internal/tui` (`wrap.go`, `layout.go`, `panel.go`, `app.go`, tests). Only the cases shared with the Go `wrap_test.go` and the Python `test_tui*.py` fixtures read for this task were reused as test data; the rest of the expectations are derived from the spec text.
 
 - **Terminal support** is limited to the tested ANSI/VT families (xterm, screen, tmux, rxvt and variants) on Linux; other `TERM` values use the plain chat. The references use curses/terminfo (Python) and tcell (Go).
-- `COST (EST.)` shows `unavailable` (no pricing).
+- `COST (EST.)` and the `/usage` cost line follow Python `pricing.py` (executed parity: `npm run test:pricing-parity`, see `docs/pricing.md`). The Go cost tests were read, not executed; the consolidated three-language gate is Task 011.
 - **Concurrency**: Node async I/O instead of Python's worker thread and queue; the same observable contract (a bounded, pull-based handoff, 256 events per yield, one request at a time, retired identity on cancel, 0.1 s redraw). Unlike Python's documented limitation, cancellation closes the connection immediately and a new request waits for that close; a provider that does not close within the bound ends the program with exit 130.
 - **`DONE` timing**: the status appears after the exchange was saved (Python: also after the save, but synchronously); during the save Enter is refused with `Please wait; the conversation is being updated`.
 - **Title**: the actual package version and the TypeScript edition name; the `scrolled up N (PgDn)` suffix keeps priority over a long title.

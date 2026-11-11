@@ -275,8 +275,8 @@ void describe("usageReport", () => {
   const at = new Date("2026-01-01T00:00:00.000Z");
   const rec = (status: "completed" | "incomplete", usage: StoredUsageRecord["usage"]): StoredUsageRecord => ({ at, provider: "ollama", model: "q", status, usage });
 
-  void it("says so when there are no requests, and that costs are not estimated", () => {
-    assert.match(usageReport([]), /no API requests in this conversation yet\.\nCost estimates are not implemented yet\./);
+  void it("says so when there are no requests, with the no-requests cost line", () => {
+    assert.equal(usageReport([]), "Token usage: no API requests in this conversation yet.\nEstimated cost: - (no requests yet)");
   });
 
   void it("sums each field independently with exact bigints and labels partial coverage", () => {
@@ -292,8 +292,8 @@ void describe("usageReport", () => {
     assert.match(text, /Cached input tokens \(part of input\): 3 \(reported subtotal: 1 of 3/);
     assert.match(text, /Latest completed request input: 5 tokens/); // not the incomplete request's input
     assert.match(text, /Includes 1 incomplete answer/);
-    assert.match(text, /Cost estimates are not implemented yet\./);
-    assert.ok(!text.includes("$"));
+    assert.ok(text.endsWith("API cost: $0 (local Ollama inference)"), text); // the helper's records are local Ollama
+    assert.ok(!text.includes("not implemented"));
   });
 
   void it("complete coverage has no subtotal label and zero is a reported count", () => {

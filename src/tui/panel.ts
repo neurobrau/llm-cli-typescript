@@ -4,6 +4,7 @@
  * Token figures are exact bigint sums of the usage records; abbreviation uses
  * integer arithmetic only, never `Number(bigint)`.
  */
+import { formatCostShort, totalCost } from "../pricing/index.js";
 import type { ResolvedSettings } from "../domain/settings.js";
 import type { StoredUsageRecord } from "../storage/types.js";
 import { PANEL_CONTENT_WIDTH } from "./layout.js";
@@ -24,6 +25,8 @@ export interface PanelStats {
   readonly reasoning: bigint | undefined;
   /** Input tokens of the latest completed request. */
   readonly context: bigint | undefined;
+  /** Short estimated cost of these records (`-` when there are none); computed with the counts, not per frame. */
+  readonly cost: string;
   readonly any: boolean;
 }
 
@@ -47,6 +50,7 @@ export function panelStats(records: readonly StoredUsageRecord[]): PanelStats {
     cached: sum(records, "cachedInputTokens"),
     reasoning: sum(records, "reasoningTokens"),
     context: records.findLast((record) => record.status === "completed")?.usage.inputTokens,
+    cost: formatCostShort(totalCost(records)),
     any: records.length > 0,
   };
 }
@@ -122,6 +126,6 @@ export function settingsPanelRows(settings: ResolvedSettings, stats: PanelStats)
     if (stats.reasoning !== undefined && stats.reasoning > 0n) rows.push(value(`reasoning ${compact(stats.reasoning)}`));
   }
   if (stats.context !== undefined) rows.push(value(`context ${compact(stats.context)}`));
-  rows.push(heading("COST (EST.)"), value("unavailable"));
+  rows.push(heading("COST (EST.)"), value(stats.cost));
   return rows;
 }

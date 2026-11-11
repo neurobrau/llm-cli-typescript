@@ -34,7 +34,7 @@ void describe("fullscreen: commands", () => {
     assert.ok(session.term.inputLine().includes("YOU > half typed"));
     await session.key(KEYS.ctrlU);
     await submit(session, "\\USAGE");
-    assert.ok(session.term.flat().includes("Token usage: no API requests in this conversation yet. Cost estimates are not implemented yet."));
+    assert.ok(session.term.flat().includes("Token usage: no API requests in this conversation yet."));
     await submit(session, "/Frobnicate");
     assert.ok(session.term.flat().includes("Unknown command: /frobnicate. Type /help for commands."));
     assert.equal(session.provider.calls, 0);

@@ -7,7 +7,7 @@ export const TUI_HELP = `Commands:
   /help     show this help
   /reset    start a new conversation (the previous one stays saved)
   /cleanup  delete all saved conversations (asks for confirmation)
-  /usage    token usage of this conversation (cost estimates are not implemented yet)
+  /usage    token usage and ESTIMATED cost of this conversation
   /exit     exit the application (the conversation stays saved)
 Backslash aliases also work: \\help, \\reset, \\cleanup, \\usage, \\exit.
 Keys: F1 this help, Enter send, Backspace/Delete edit, Left/Right/Home/End move,
