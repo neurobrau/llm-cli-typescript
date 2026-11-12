@@ -5,7 +5,7 @@
  * mutated and results are frozen.
  */
 import type { TokenUsage } from "../domain/generation.js";
-import { pricingFor } from "./catalog.js";
+import { pricingFor, tierFactor } from "./catalog.js";
 import { FACTOR_SCALE, ZERO_USD, addUsd } from "./money.js";
 import type { Usd } from "./money.js";
 
@@ -74,7 +74,7 @@ export function estimate(request: PricedRequest): CostEstimate {
     factor = FACTOR_SCALE;
     notes.push("Standard tier assumed (tier not reported)");
   } else {
-    const known = pricing.tiers.get(tier);
+    const known = tierFactor(pricing, tier);
     if (known === undefined) {
       return unavailable(`no pricing for the ${tier} tier of ${model}`);
     }

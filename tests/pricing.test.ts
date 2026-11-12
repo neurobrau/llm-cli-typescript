@@ -57,7 +57,7 @@ void describe("catalog", () => {
     assert.equal(pricingFor(LUNA)?.longContextThreshold, 272_000n);
     assert.deepEqual(pricingFor("gpt-5.1")?.standard, { input: 1250n, cachedInput: 125n, output: 10000n });
     assert.equal(pricingFor("gpt-5.1")?.longContext, undefined);
-    assert.deepEqual([...(pricingFor("gpt-5.1")?.tiers ?? [])], [["default", 2n]]);
+    assert.deepEqual(pricingFor("gpt-5.1")?.tiers, [["default", 2n]]);
   });
 
   void it("looks models up exactly, with one anchored dated-snapshot fallback", () => {
@@ -67,6 +67,33 @@ void describe("catalog", () => {
     }
     // Only one suffix is removed.
     assert.equal(pricingFor("gpt-6-luna-2026-09-01-2026-09-01"), undefined);
+  });
+
+  void it("returns immutable catalog data: mutation attempts fail and never change later estimates", () => {
+    const usage = full(100_000n, 10_000n);
+    const before = estimate(req(usage)).amount?.units;
+    const attempts = ["gpt-6-luna", "gpt-6-luna-2026-09-01", "gpt-5.1", "gpt-5.1-2025-11-13"];
+    for (const name of attempts) {
+      const pricing = pricingFor(name) as unknown as Record<string, unknown> | undefined;
+      assert.ok(pricing !== undefined, name);
+      const tierList = pricing.tiers as unknown[][];
+      const standard = pricing.standard as Record<string, unknown>;
+      assert.throws(() => { tierList.push(["evil", 0n]); }, TypeError, name);
+      assert.throws(() => { tierList[0]?.splice(1, 1, 0n); }, TypeError, name);
+      assert.throws(() => { tierList[0] = ["default", 0n]; }, TypeError, name);
+      assert.throws(() => { standard.input = 0n; }, TypeError, name);
+      assert.throws(() => { pricing.standard = {}; }, TypeError, name);
+      assert.throws(() => { delete pricing.tiers; }, TypeError, name);
+      assert.ok(!(pricing.tiers instanceof Map), "no mutable Map is exposed");
+      assert.ok(Object.isFrozen(pricing) && Object.isFrozen(tierList) && tierList.every((entry) => Object.isFrozen(entry)) && Object.isFrozen(standard), name);
+    }
+    (catalogModels() as string[]).push("evil"); // a fresh copy each call
+    assert.deepEqual(catalogModels(), ["gpt-6-luna", "gpt-5.1"]);
+    assert.throws(() => { (PRICING_SOURCES as string[]).push("evil"); }, TypeError);
+    assert.equal(estimate(req(usage)).amount?.units, before);
+    assert.equal(estimate(req(usage, { model: "gpt-6-luna-2026-09-01" })).amount?.units, before);
+    assert.equal(estimate(req(usage, { tier: "evil" })).status, "unavailable");
+    assert.equal(estimate(req(full(1_000n, 1_000n), { model: "gpt-5.1" })).amount?.units, 11_250_000n * 2n);
   });
 
   void it("parses only exact rates", () => {

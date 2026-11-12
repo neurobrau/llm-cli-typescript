@@ -1,4 +1,4 @@
-export { PRICING_SOURCES, PRICING_VERSION, catalogModels, pricingFor } from "./catalog.js";
+export { PRICING_SOURCES, PRICING_VERSION, catalogModels, pricingFor, tierFactor } from "./catalog.js";
 export type { ModelPricing, Rates } from "./catalog.js";
 export { estimate, isCloudName, totalCost } from "./estimate.js";
 export type { CostEstimate, CostStatus, PricedRequest } from "./estimate.js";

@@ -29,8 +29,20 @@ export interface ModelPricing {
   readonly longContext?: Rates;
   /** Reported input tokens of one request; strictly above it the long-context rates apply. */
   readonly longContextThreshold?: bigint;
-  /** Tier name to factor in halves (`FACTOR_SCALE` = 1x). */
-  readonly tiers: ReadonlyMap<string, bigint>;
+  /**
+   * Tier name and factor in halves (`FACTOR_SCALE` = 1x). Deeply frozen plain
+   * data: a `Map` cannot be frozen, so none is ever exposed.
+   */
+  readonly tiers: readonly (readonly [string, bigint])[];
+}
+
+/** The factor of a tier of this model, or `undefined` for a tier it does not list. */
+export function tierFactor(pricing: ModelPricing, tier: string): bigint | undefined {
+  return pricing.tiers.find(([name]) => name === tier)?.[1];
+}
+
+function tiers(...entries: readonly (readonly [string, bigint])[]): ModelPricing["tiers"] {
+  return Object.freeze(entries.map((entry) => Object.freeze([...entry] as const)));
 }
 
 function rates(input: string, cachedInput: string, output: string, cacheWrite?: string): Rates {
@@ -54,20 +66,14 @@ const CATALOG: ReadonlyMap<string, ModelPricing> = new Map<string, ModelPricing>
       standard: rates("0.10", "0.01", "0.50", "0.125"),
       longContext: rates("0.20", "0.02", "0.75", "0.25"),
       longContextThreshold: 272_000n,
-      tiers: new Map<string, bigint>([
-        ["default", ONE],
-        ["flex", HALF],
-        ["batch", HALF],
-        ["fast", TWICE],
-        ["priority", TWICE], // "priority" was renamed "fast" in the reference
-      ]),
+      tiers: tiers(["default", ONE], ["flex", HALF], ["batch", HALF], ["fast", TWICE], ["priority", TWICE]), // "priority" was renamed "fast" in the reference
     }),
   ],
   [
     "gpt-5.1",
     Object.freeze({
       standard: rates("1.25", "0.125", "10.00"),
-      tiers: new Map<string, bigint>([["default", ONE]]),
+      tiers: tiers(["default", ONE]),
     }),
   ],
 ]);
