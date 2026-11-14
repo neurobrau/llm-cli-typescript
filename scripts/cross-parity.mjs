@@ -72,9 +72,9 @@ async function main() {
   const safeEnv = oracleEnv(scratch);
 
   // ----- prerequisites and reference identities -----
-  const pyVersion = await runBounded(cfg.python, ["--version"], { env: safeEnv, timeoutMs: 20_000 });
+  const pyVersion = await runBounded(cfg.python, ["--version"], { env: safeEnv, timeoutMs: 20_000, uncapped: true });
   if (pyVersion.error !== undefined || pyVersion.code !== 0) throw new Blocked(`Python interpreter "${cfg.python}" cannot run; set NEUROBRAU_PYTHON`);
-  const goVersion = await runBounded(cfg.go, ["version"], { env: { PATH: env.PATH ?? "", HOME: join(scratch, "home") }, timeoutMs: 20_000 });
+  const goVersion = await runBounded(cfg.go, ["version"], { env: { PATH: env.PATH ?? "", HOME: join(scratch, "home") }, timeoutMs: 20_000, uncapped: true });
   if (goVersion.error !== undefined || goVersion.code !== 0) throw new Blocked(`Go toolchain "${cfg.go}" cannot run; install Go or set NEUROBRAU_GO (nothing is installed automatically)`);
   for (const [name, repo] of [["Python", cfg.pythonRepo], ["Go", cfg.goRepo]]) {
     if (!existsSync(repo)) throw new Blocked(`${name} reference repository not found at ${repo}; set NEUROBRAU_${name.toUpperCase()}_REPO`);

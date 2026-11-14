@@ -22,40 +22,102 @@ const MAX_OUTPUT = 256 * 1024 * 1024;
 /** Test seam: a tighter global deadline (milliseconds) so timeout paths run without slow waits. */
 const DEADLINE_CAP = Number(process.env.NEUROBRAU_XPARITY_TIMEOUT_MS) > 0 ? Number(process.env.NEUROBRAU_XPARITY_TIMEOUT_MS) : Infinity;
 
+const activeGroups = new Set();
+let exitHookInstalled = false;
+
+/** SIGKILL a whole process group (Linux/POSIX): works even when the group leader has already exited. */
+function killGroup(pid) {
+  try {
+    process.kill(-pid, "SIGKILL");
+  } catch {
+    // ESRCH: no member left; EPERM cannot happen for our own children
+  }
+}
+
+function installExitHook() {
+  if (exitHookInstalled) return;
+  exitHookInstalled = true;
+  process.on("exit", () => {
+    for (const pid of activeGroups) killGroup(pid);
+  });
+}
+
 /**
  * Runs a command with an argument array (never a shell), a deadline and a
- * bounded stdout/stderr capture. The child is killed on timeout or when the
- * bound is exceeded; the promise always settles after the child is gone.
+ * bounded stdout/stderr capture. The child leads its own process group; on
+ * timeout, output overflow, or when the direct child exits while a descendant
+ * still holds the pipes open, the WHOLE group is killed (also after the
+ * leader has exited) and the promise settles within a short bounded grace even
+ * if a pipe somehow stays open. The group is killed again after settlement, so
+ * no descendant outlives the call. Requires POSIX process groups (supported
+ * Linux); the gate does not run elsewhere.
  */
 export function runBounded(file, args, options = {}) {
-  const { env = {}, cwd, maxBytes = MAX_OUTPUT, input } = options;
-  const timeoutMs = Math.min(options.timeoutMs ?? 120_000, DEADLINE_CAP);
+  const { env = {}, cwd, maxBytes = MAX_OUTPUT, input, exitGraceMs = 1000, settleGraceMs = 1000 } = options;
+  const timeoutMs = options.uncapped === true ? (options.timeoutMs ?? 120_000) : Math.min(options.timeoutMs ?? 120_000, DEADLINE_CAP);
+  installExitHook();
   return new Promise((resolve) => {
     let child;
     try {
-      child = spawn(file, args, { env, cwd, stdio: ["pipe", "pipe", "pipe"], shell: false });
+      child = spawn(file, args, { env, cwd, stdio: ["pipe", "pipe", "pipe"], shell: false, detached: true });
     } catch (error) {
-      resolve({ error, code: null, signal: null, stdout: Buffer.alloc(0), stderr: "", timedOut: false, truncated: false });
+      resolve({ error, code: null, signal: null, stdout: Buffer.alloc(0), stderr: "", timedOut: false, truncated: false, orphaned: false });
       return;
     }
+    const pid = child.pid;
+    if (pid !== undefined) activeGroups.add(pid);
     const out = [];
     const err = [];
     let size = 0;
     let timedOut = false;
     let truncated = false;
+    let orphaned = false;
     let spawnError;
-    const stop = () => {
-      if (child.exitCode === null && child.signalCode === null) child.kill("SIGKILL");
+    let exited = false;
+    let exitCode = null;
+    let exitSignal = null;
+    let settled = false;
+    const timers = [];
+    const kill = () => {
+      if (pid !== undefined) killGroup(pid);
     };
-    const timer = setTimeout(() => {
-      timedOut = true;
-      stop();
-    }, timeoutMs);
+    const settle = () => {
+      if (settled) return;
+      settled = true;
+      for (const timer of timers) clearTimeout(timer);
+      kill(); // nothing the child started may outlive the call
+      if (pid !== undefined) activeGroups.delete(pid);
+      child.stdout.destroy();
+      child.stderr.destroy();
+      resolve({
+        error: spawnError,
+        code: exitCode,
+        signal: exitSignal,
+        stdout: Buffer.concat(out),
+        stderr: Buffer.concat(err).toString("utf8").slice(-4000),
+        timedOut,
+        truncated,
+        orphaned,
+      });
+    };
+    /** Kill the group now and settle at the latest after a short grace, whatever the pipes do. */
+    const terminate = () => {
+      kill();
+      timers.push(setTimeout(settle, settleGraceMs));
+    };
+    timers.push(
+      setTimeout(() => {
+        if (settled) return;
+        timedOut = true;
+        terminate();
+      }, timeoutMs),
+    );
     const take = (target) => (chunk) => {
+      if (settled || truncated) return;
       size += chunk.length;
       if (size > maxBytes) {
         truncated = true;
-        stop();
+        terminate();
         return;
       }
       target.push(chunk);
@@ -65,18 +127,27 @@ export function runBounded(file, args, options = {}) {
     child.stdin.on("error", () => undefined);
     child.once("error", (error) => {
       spawnError = error;
+      settle();
+    });
+    child.once("exit", (code, signal) => {
+      exited = true;
+      exitCode = code;
+      exitSignal = signal;
+      // A descendant that keeps the pipes open after the child is gone must not hold us until the deadline.
+      timers.push(
+        setTimeout(() => {
+          if (settled) return;
+          orphaned = true;
+          terminate();
+        }, exitGraceMs),
+      );
     });
     child.once("close", (code, signal) => {
-      clearTimeout(timer);
-      resolve({
-        error: spawnError,
-        code,
-        signal,
-        stdout: Buffer.concat(out),
-        stderr: Buffer.concat(err).toString("utf8").slice(-4000),
-        timedOut,
-        truncated,
-      });
+      if (!exited) {
+        exitCode = code;
+        exitSignal = signal;
+      }
+      settle();
     });
     child.stdin.end(input);
   });
@@ -102,6 +173,7 @@ export function expectClean(result, what) {
   if (result.error !== undefined) throw new Failure(`${what}: could not run (${result.error.message})`);
   if (result.timedOut) throw new Failure(`${what}: timed out`);
   if (result.truncated) throw new Failure(`${what}: output exceeded the bound`);
+  if (result.orphaned) throw new Failure(`${what}: a descendant kept the output open after the process exited (terminated)`);
   if (result.code !== 0) throw new Failure(`${what}: exit ${String(result.code)}${result.stderr === "" ? "" : `: ${result.stderr.trim().split("\n").slice(-3).join(" | ")}`}`);
   return result.stdout.toString("utf8");
 }

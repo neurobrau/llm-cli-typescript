@@ -3,7 +3,9 @@ import { spawnSync } from "node:child_process";
 import { chmod, mkdir, mkdtemp, readdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
+import { readFileSync } from "node:fs";
 import { pathToFileURL } from "node:url";
+import { setTimeout } from "node:timers";
 import { after, before, describe, it } from "node:test";
 
 import { startNode } from "./helpers/spawn.js";
@@ -16,7 +18,8 @@ interface Lib {
   coverageProblems(label: string, expected: string[], actual: string[]): string[];
   fractionFromDecimal(text: string): [bigint, bigint];
   fractionFromParts(num: string, den: string): [bigint, bigint];
-  runBounded(file: string, args: string[], options?: Record<string, unknown>): Promise<{ error?: Error; code: number | null; stdout: Buffer; timedOut: boolean; truncated: boolean }>;
+  runBounded(file: string, args: string[], options?: Record<string, unknown>): Promise<{ error?: Error; code: number | null; stdout: Buffer; timedOut: boolean; truncated: boolean; orphaned: boolean }>;
+  expectClean(result: unknown, what: string): string;
   compareSettings(item: unknown, py: unknown, go: unknown, ts: unknown, sibling?: unknown): { problems: string[]; rules: string[] };
 }
 interface Gate {
@@ -143,6 +146,76 @@ void describe("bounded subprocesses", () => {
     assert.ok(missing.error !== undefined);
     const echoed = await lib.runBounded(process.execPath, ["-p", "process.argv[1]", "$(echo pwned); `x` | y"], { env: {} });
     assert.equal(echoed.stdout.toString("utf8").trim(), "$(echo pwned); `x` | y");
+  });
+});
+
+/** A process that no longer runs (a zombie awaiting reaping counts as gone). */
+function isGone(pid: number): boolean {
+  try {
+    const stat = readFileSync(`/proc/${String(pid)}/stat`, "utf8");
+    return stat.slice(stat.lastIndexOf(")") + 2, stat.lastIndexOf(")") + 3) === "Z";
+  } catch {
+    return true;
+  }
+}
+
+async function eventuallyGone(pid: number): Promise<boolean> {
+  for (let i = 0; i < 100; i += 1) {
+    if (isGone(pid)) return true;
+    await new Promise((resolve) => setTimeout(resolve, 20));
+  }
+  return false;
+}
+
+const DESCENDANT = "setInterval(() => undefined, 1000)";
+/** Parent script: starts a long-running descendant that inherits stdout/stderr and prints its pid first. */
+const withDescendant = (after: string, descendant = DESCENDANT): string =>
+  `const { spawn } = require("node:child_process");
+   const d = spawn(process.execPath, ["-e", ${JSON.stringify(descendant)}], { stdio: "inherit" });
+   console.log("pid:" + d.pid);
+   ${after}`;
+const pidOf = (stdout: Buffer): number => Number(/pid:(\d+)/.exec(stdout.toString("utf8"))?.[1]);
+
+void describe("bounded subprocesses with descendants", () => {
+  void it("a live parent with a descendant: the deadline kills the whole group and settles", async () => {
+    const done = await lib.runBounded(process.execPath, ["-e", withDescendant("setInterval(() => undefined, 1000);")], { timeoutMs: 400, env: {} });
+    assert.equal(done.timedOut, true);
+    assert.ok(await eventuallyGone(pidOf(done.stdout)), "the descendant must be terminated");
+    assert.throws(() => lib.expectClean(done, "oracle"), /timed out/);
+  });
+
+  void it("an exited parent whose descendant holds stdout/stderr open: the deadline still fires, settles and kills the descendant", async () => {
+    const started = Date.now();
+    const done = await lib.runBounded(process.execPath, ["-e", withDescendant("process.exit(0);")], { timeoutMs: 300, exitGraceMs: 60_000, env: {} });
+    assert.equal(done.timedOut, true, "the pipe stays open, so only the deadline can end this run");
+    assert.ok(Date.now() - started < 10_000, "settled without hanging");
+    assert.ok(await eventuallyGone(pidOf(done.stdout)), "the descendant must be terminated");
+    assert.throws(() => lib.expectClean(done, "oracle"), /timed out/);
+  });
+
+  void it("an exited parent with a generous deadline: the exit grace ends the wait, terminates the descendant and is a failure", async () => {
+    const done = await lib.runBounded(process.execPath, ["-e", withDescendant("process.exit(0);")], { timeoutMs: 60_000, exitGraceMs: 150, env: {} });
+    assert.equal(done.orphaned, true);
+    assert.equal(done.timedOut, false);
+    assert.equal(done.code, 0);
+    assert.ok(await eventuallyGone(pidOf(done.stdout)), "the descendant must be terminated");
+    assert.throws(() => lib.expectClean(done, "oracle"), /descendant kept the output open/);
+  });
+
+  void it("output overflow with a descendant: the group is killed, the run is truncated and fails", async () => {
+    const flood = "process.stdout.write('x'.repeat(2_000_000)); setInterval(() => undefined, 1000)";
+    const done = await lib.runBounded(process.execPath, ["-e", withDescendant("setInterval(() => undefined, 1000);", flood)], { maxBytes: 1000, timeoutMs: 30_000, env: {} });
+    assert.equal(done.truncated, true);
+    assert.equal(done.timedOut, false);
+    assert.ok(await eventuallyGone(pidOf(done.stdout)), "the descendant must be terminated");
+    assert.throws(() => lib.expectClean(done, "oracle"), /exceeded the bound/);
+  });
+
+  void it("a clean run leaves nothing behind", async () => {
+    const done = await lib.runBounded(process.execPath, ["-e", "console.log('ok')"], { env: {} });
+    assert.equal(done.code, 0);
+    assert.equal(done.orphaned, false);
+    assert.equal(lib.expectClean(done, "oracle").trim(), "ok");
   });
 });
 
@@ -273,7 +346,7 @@ async function runner(extra: Record<string, string>, timeoutMs = 60_000) {
     NEUROBRAU_XPARITY_TEST_COMMITS: "1",
     NEUROBRAU_PYTHON_COMMIT: pythonCommit,
     NEUROBRAU_GO_COMMIT: goCommit,
-    NEUROBRAU_XPARITY_TIMEOUT_MS: "3000",
+    NEUROBRAU_XPARITY_TIMEOUT_MS: "20000",
     ...extra,
   };
   return startNode([SCRIPT], env, timeoutMs).result;
