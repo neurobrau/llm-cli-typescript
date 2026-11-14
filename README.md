@@ -236,12 +236,15 @@ The installed SDK also reads `OPENAI_BASE_URL`, `OPENAI_ORG_ID`, `OPENAI_PROJECT
 | `npm test` | build, compile tests to `.test-dist/`, run them with `node:test` |
 | `npm run check` | typecheck, lint, then `npm test` (build included) |
 | `npm run test:parity` | optional: storage codecs and TS chat sessions against the read-only Python reference (needs Python; exits 3 = blocked when unavailable; not part of `check`) |
+| `npm run test:pricing-parity` | optional: the pricing module against the real Python pricing functions (exit 3 = blocked) |
+| `npm run test:cross-parity` | optional: the consolidated Python + Go + TypeScript gate (storage, settings, pricing, session interoperability) against the pinned references; needs Python, Go and the Go module cache; exit 3 = blocked (`docs/parity.md`) |
+| `npm run test:release` | optional: ordered, fail-fast `check`, storage parity, pricing parity, cross-language parity; the first failing step's exit status (1, or 3 = blocked) is the result |
 
 Tests include unit tests, runner tests with injected writers, and integration tests that spawn `dist/cli.js` with `process.execPath`, a sanitized environment, and temporary `HOME`/`XDG_*` directories. They contact only loopback mock servers (never OpenAI, never a real Ollama) and read no user data or credentials.
 
 ## Planned milestones
 
-Estimated costs are implemented (Task 010, `docs/pricing.md`; one-shot `--usage` output is unchanged). (OpenAI and Ollama one-shot, the plain chat with history, `--stream`, the fullscreen chat and its menus, provider/model switching and saved preferences are implemented). Version plan: `0.1.0` completed CLI Foundation; `0.2.0` completed chat/history/streaming; `0.3.0` completed TUI (menus, switching, saved preferences); `0.4.0-dev` (current) estimated costs, then the consolidated three-language parity gate (Task 011) before `0.4.0`. See `docs/architecture.md` and `docs/parity.md`.
+Estimated costs are implemented (Task 010, `docs/pricing.md`; one-shot `--usage` output is unchanged). The consolidated cross-language gate and the release audit are Task 011 (`docs/parity.md`, `docs/release-audit.md`); the `0.4.0` release itself needs a separate owner decision. (OpenAI and Ollama one-shot, the plain chat with history, `--stream`, the fullscreen chat and its menus, provider/model switching and saved preferences are implemented). Version plan: `0.1.0` completed CLI Foundation; `0.2.0` completed chat/history/streaming; `0.3.0` completed TUI (menus, switching, saved preferences); `0.4.0-dev` (current) estimated costs, then the consolidated three-language parity gate (Task 011) before `0.4.0`. See `docs/architecture.md` and `docs/parity.md`.
 
 ## Working documents
 

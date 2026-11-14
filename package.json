@@ -17,7 +17,9 @@
     "test": "npm run build && npm run build:test && node scripts/run-tests.mjs",
     "check": "npm run typecheck && npm run lint && npm test",
     "test:parity": "npm run build && node scripts/storage-parity.mjs",
-    "test:pricing-parity": "npm run build && node scripts/pricing-parity.mjs"
+    "test:pricing-parity": "npm run build && node scripts/pricing-parity.mjs",
+    "test:cross-parity": "npm run build && node scripts/cross-parity.mjs",
+    "test:release": "node scripts/release-gate.mjs"
   },
   "devDependencies": {
     "@eslint/js": "10.0.1",

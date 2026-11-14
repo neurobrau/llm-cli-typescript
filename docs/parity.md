@@ -11,9 +11,48 @@
 
 Both are read-only. The Go version constant (`0.4.0-dev`) and the Python version are independent of this edition's `0.4.0-dev` (version plan in `docs/architecture.md`).
 
+## Consolidated cross-language gate (Task 011)
+
+`npm run test:cross-parity` (builds first; optional, never part of `npm run check`) executes the real pinned reference code and compares it with the real TypeScript code on synthetic data only. Environment: `NEUROBRAU_PYTHON` (default `python3`), `NEUROBRAU_PYTHON_REPO` (default `../llm-cli-python`), `NEUROBRAU_GO` (default `go`), `NEUROBRAU_GO_REPO` (default `../llm-cli-go`), `NEUROBRAU_GO_MODCACHE` (default `go env GOMODCACHE`, read only). The two pinned commits are exported with `git archive` into a private temporary tree: Python `0a6d045c022b850371a1c51a1df30f11d9d4c60e` (`src/` only) and Go `b064decc66cad7d9656488bdf7749650b52cf309` (whole module). A missing or different commit is BLOCKED; nothing is downloaded or installed. The Go adapter (`scripts/xparity/xparity.go`) is copied into the temporary copy as `cmd/xparity`, so it can import the reference's `internal/{storage,chat,llm,pricing}`; it is built offline (`GOPROXY=off`, `GOFLAGS=-mod=readonly`, `GOTOOLCHAIN=local`, `CGO_ENABLED=0`, caches in the temporary tree). Python runs as `python -B -I` with a synthetic HOME/XDG. Subprocesses use argument arrays, a deadline and a bounded capture, and receive no provider credentials. The reference worktrees (HEAD and `git status --porcelain`) are compared before and after the run, and are never written. Exit 0 = pass, 1 = failure, 3 = BLOCKED (missing interpreter, Go toolchain, repository, commit or Go module cache).
+
+`npm run test:release` runs `check`, the storage parity, the pricing parity and then this gate in order, stopping at the first failing step and returning its exit status (3 stays 3). Steps 2-4 reuse the `dist/` that step 1 built.
+
+| Contract | Real code executed | Cases | Result |
+| --- | --- | --- | --- |
+| Storage, common domain (conversations incl. usage records, `active.json`, `settings.json`) | Python `HistoryStore`/`SettingsStore` reader+writer; Go `DecodeConversation/EncodeConversation`, `DecodeSettings/EncodeSettings`, `LoadActive/SaveActive`; TypeScript codecs | 16 canonical files (empty/multi-turn/legacy shapes, completed/incomplete, absent vs zero, absent vs `""` tier, counts at 2^53-1, 2^53+1 and 2^63-1 in separate records, control and astral text, year 0001/9999, saved reasoning `default` vs absent, max absent/null/integer, independent providers, `__proto__`, integer-like and code-point-ordered keys) | exact bytes in TS->Python, TS->Go, TS->Python->Go->TS and TS->Go->Python->TS (32 file passes); plus files from the references' own writers/generators (Python writer, Go writer, Go generator, Python generator: 14 files) read by TypeScript and the readers that apply |
+| Normalization | the same | 6 raw files (offset timestamps truncated to UTC milliseconds, unknown fields dropped, absent status, null provider/tier, malformed records skipped, unsorted settings, spaced `active.json`) | all three produce the TypeScript canonical bytes, with content assertions |
+| Rejection | the same | 17 files (malformed JSON, empty, wrong top level, schema 2/`"1"`, bad id, bad messages/role/content, missing/naive timestamp, empty provider, bad settings, bad active) | nobody produces a result |
+| Settings resolution | Python `preferences.resolve_model_settings`; Go `chat.ResolveSettings/ResolveSwitchedSettings` (fake provider); TypeScript `resolveSettings` | 781 named cases: 5 support shapes x 9 CLI x 7 saved reasoning values x strict/lenient; limit x CLI max x saved max (absent/null/1/600/limit/limit+1); 4 lookup failures; 3 combined | identical effective reasoning, explicit bit, max tokens, error classification and ordered notices except the rules below |
+| Pricing | Python `pricing.estimate/total_cost/format_*`; Go `pricing.Request/Total/Short/Describe/FormatMoney` (exact `big.Rat`); TypeScript `src/pricing` | 78 cases / 117 records / 25 money fixtures (Task 010 corpus) | identical to Python for all; identical to Go for the 74 cases within signed 64 bits; amounts compared as exact rationals; short text, `/usage` cost line, status and ordered notes compared |
+| Session interoperability | the real TypeScript `run()` (plain, streaming, fullscreen with menus) with the real filesystem stores and fake providers; Python and Go readers/writers at every checkpoint | 6 scenarios / 6 checkpoints | see below |
+
+Negative controls (each must be detected or the gate fails): storage corrupted bytes, dropped file, dropped/duplicated/extra coverage and a changed value; settings altered Go value, altered TypeScript notice, dropped Python result and duplicated Go result; pricing altered Python amount, altered Go note, dropped case, dropped **last** money fixture, duplicated money fixture, altered money text and an emptied case set. Every oracle result list is checked for exactly-once coverage of the expected case ids and money fixtures in both directions. The default suite (`tests/cross-parity-script.test.ts`) additionally exercises missing interpreter/Go/repository/commit/module cache (exit 3), malformed/empty/crashing/hanging oracles and a modified reference worktree (exit 1), the comparison rules, bounded subprocesses and the release-gate order with stand-ins, with no real reference execution.
+
+Session scenarios: (1) a Python-written conversation (counts at 2^53+1) restored and continued by TypeScript, read by Go and Python with unchanged prior messages and exact accumulated usage; (2) the same with a Go-written OpenAI conversation (empty tier, incomplete record at 2^62); (3) a streamed TypeScript session whose reasoning text and interrupted partial answer never reach the file; (4) incomplete usage counted without committing the partial answer, and an incomplete-only new conversation staying unsaved (accepted policy); (5) saved model-default reasoning and null max tokens omitted from requests, settings bytes unchanged, independent selections with their own histories and an `active.json` naming the last selection; (6) the fullscreen menus (F6/F4/F5/F2) saving preferences and keeping per-model conversations, read back by both references.
+
+### Intentional differences versus failures
+
+Every entry below is asserted per implementation (storage) or per case with a checked condition (settings); an unlisted difference fails the gate.
+
+| Area | Difference | Why |
+| --- | --- | --- |
+| Storage | Counts or saved limits above signed 64 bits: Python and TypeScript keep them exactly; Go skips the usage record (or ignores the settings entry with a warning) and never rounds | Go reads `int`; TypeScript follows Python's arbitrary integers (`docs/storage.md`) |
+| Storage | Unknown conversation provider: Python and TypeScript keep it, Go reads it but refuses to write it | Go's writer validates providers |
+| Storage | U+2028/U+2029 in text: Go writes `\u2028`/`\u2029`; Python and TypeScript write the raw characters. Same data; Go's output normalizes back to the canonical bytes in TypeScript. **This is a real byte difference in Go's writer** (Go's encoder always escapes them): canonical bytes are therefore claimed for the common domain *excluding* these two code points. TypeScript keeps the Python-compatible raw form; no TypeScript change was made to imitate Go | encoding/json behavior in the Go reference; reported, not changed |
+| Storage | NaN, `schema_version: true`, space-separated timestamps: TypeScript rejects all; Go rejects all; Python accepts them (NaN: skips the record) | `docs/storage.md` strict RFC 3339 / JSON policy |
+| Storage | Unknown provider in `active.json`: TypeScript and Go reject; Python accepts any string | typed error policy |
+| Settings | Python drops the explicit bit when an explicit choice sends nothing (saved/CLI model default, `none`/`off` on a model without reasoning); Go and TypeScript keep it | existing accepted difference (Task 002) |
+| Settings | TypeScript's lenient CLI-reasoning notice ends `; ignoring the command-line value.`, the references `; using the default.`; unconfirmed support is described as `reasoning support is not confirmed` (references: `does not support reasoning`) | existing accepted wording (Task 002); only these exact suffixes are rewritten before comparing |
+| Settings | A failed capability lookup adds a notice in Python and Go; the pure TypeScript resolver adds none (its caller does) | pure resolver (Task 002) |
+| Settings | A non-positive command-line max: Go treats it as not given (its result must equal the case without it); Python and TypeScript reject it | Go `> 0` guard; not copied |
+| Pricing | Cases with counts above signed 64 bits are classified out of Go's domain (computed independently, not trusted from Go) | Go `int` |
+| Pricing | The `/usage` report adds the cost line as a second line for an empty conversation and escapes control characters in notices (asserted for a hostile model name) | Task 010 decisions |
+
+No unresolved compatibility finding remains from this gate other than the Go U+2028/U+2029 writer difference above (a Go reference behavior, outside TypeScript's contract).
+
 ## Settings resolution (Task 002, internal)
 
-The resolver follows Python `docs/tui-spec.md` section 13 and the Go `chat.ResolveSettings` order (CLI, saved, built-in). Tests use table-driven cases derived from those rules; no cross-language harness or live parity run exists yet (deferred).
+The resolver follows Python `docs/tui-spec.md` section 13 and the Go `chat.ResolveSettings` order (CLI, saved, built-in). Tests use table-driven cases derived from those rules. The Task 011 gate (`npm run test:cross-parity`) now executes the real Python and Go resolvers against the same matrix; its result and the accepted differences are in "Consolidated cross-language gate (Task 011)" below.
 
 Deliberate differences and notes:
 
@@ -67,18 +106,18 @@ Details in `docs/storage.md`. Intentional differences from the references: only 
 
 References: Python `session.py`, `chat.py`, `cli.py`, `usage.py`, `docs/tui-spec.md` §§1, 8, 9, 11, 13, 15, 16; Go `internal/session`, `internal/chat`, `internal/cli/interactive.go`. Kept: banner and labels, notices, command set and aliases, restore rules and active selection, save-after-completed-exchange, reset/cleanup semantics, incomplete-usage save policy, warnings on stderr, exit codes.
 
-- No fullscreen TUI: every interactive run is the plain chat, also on a terminal (`--plain` is accepted and redundant).
+- *Historical (Task 006; superseded by Task 008):* at the time there was no fullscreen TUI and every interactive run was the plain chat. Today the fullscreen chat is automatic on a supported terminal and `--plain` selects the line-oriented chat.
 - `--usage` also prints usage after incomplete replies (Go/Python only after completed ones).
 - `--plain`/`--no-history` with a prompt are rejected (exit 2); Python/Go silently ignore them.
 - Restore: conversations of unknown providers are skipped (Go) and never rewritten; a valid active selection without a conversation never falls back to an unrelated one; unknown-provider and invalid `active.json` are warnings.
-- Settings are read-only in the chat (Go writes them only from the TUI). A saved limit above `Number.MAX_SAFE_INTEGER` is ignored with a notice (file untouched); the references read it as a plain integer.
+- Settings are read-only in the plain chat (Go writes them only from the TUI); the fullscreen menus save confirmed F4/F5/F6 choices (Task 009). A saved limit above `Number.MAX_SAFE_INTEGER` is ignored with a notice (file untouched); the references read it as a plain integer.
 - Missing home: history and settings are disabled independently; Python/Go warn the same way but resolve XDG bases independently only per call.
 - The OpenAI key is checked for presence only (no validation, no Models request) before the banner; Python/Go do the same presence check.
 - Cancellation: Ctrl+C aborts the request (`AbortController`) and waits at most a bounded time; Go waits for the goroutine without a bound. A response that lost the race against an interrupt is discarded. After a response is committed, Ctrl+C waits for the save and then exits 130.
 - Input is read through a bounded, paused-when-full reader; the references read synchronously (Python `input()`) or via a goroutine. EOF while a request is in flight does not cancel it. A read error exits 1 (Go treats it as EOF).
 - Saving and printing order: the exchange is committed and saved first, then printed (as Go).
 - `/cleanup` with a partial failure keeps the in-memory session (Go) and prints the number already deleted.
-- Verified against Python: `npm run test:parity` loads TS-session-written files with the Python readers and checks the Python writer reproduces the bytes, and continues a Python-written conversation through a TS session. The Go serializers are not executed (deferred to the consolidated gate).
+- Verified against Python: `npm run test:parity` loads TS-session-written files with the Python readers and checks the Python writer reproduces the bytes, and continues a Python-written conversation through a TS session. The Go serializers are executed by the Task 011 gate (see below). *Historical note from Task 006: it was deferred then.*
 
 ## Streaming differences (Task 007)
 
@@ -101,7 +140,7 @@ References: Python `docs/tui-spec.md` §12/§14/§15/§16 and the Python/Go stre
 References: Python `docs/tui-spec.md` §1–10, 11, 14, 16 and `ui/tui.py`, `ui/status.py`; Go `internal/tui` (`wrap.go`, `layout.go`, `panel.go`, `app.go`, tests). Only the cases shared with the Go `wrap_test.go` and the Python `test_tui*.py` fixtures read for this task were reused as test data; the rest of the expectations are derived from the spec text.
 
 - **Terminal support** is limited to the tested ANSI/VT families (xterm, screen, tmux, rxvt and variants) on Linux; other `TERM` values use the plain chat. The references use curses/terminfo (Python) and tcell (Go).
-- `COST (EST.)` and the `/usage` cost line follow Python `pricing.py` (executed parity: `npm run test:pricing-parity`, see `docs/pricing.md`). The Go cost tests were read, not executed; the consolidated three-language gate is Task 011.
+- `COST (EST.)` and the `/usage` cost line follow Python `pricing.py` (executed parity: `npm run test:pricing-parity`, see `docs/pricing.md`). The Go pricing functions are executed by the Task 011 gate (see below).
 - **Concurrency**: Node async I/O instead of Python's worker thread and queue; the same observable contract (a bounded, pull-based handoff, 256 events per yield, one request at a time, retired identity on cancel, 0.1 s redraw). Unlike Python's documented limitation, cancellation closes the connection immediately and a new request waits for that close; a provider that does not close within the bound ends the program with exit 130.
 - **`DONE` timing**: the status appears after the exchange was saved (Python: also after the save, but synchronously); during the save Enter is refused with `Please wait; the conversation is being updated`.
 - **Title**: the actual package version and the TypeScript edition name; the `scrolled up N (PgDn)` suffix keeps priority over a long title.
