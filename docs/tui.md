@@ -1,6 +1,6 @@
 # Fullscreen chat (Tasks 008 and 009)
 
-The DOS-style fullscreen chat (the completed `0.3.0` TUI milestone; `0.4.0-dev` adds the estimated cost). Reference: Python `docs/tui-spec.md` sections 1–10, 11 (restore/save/reset/cleanup), 14 (fullscreen streaming) and 16, at commit `0a6d045c022b850371a1c51a1df30f11d9d4c60e`; Go `internal/tui` at `b064decc66cad7d9656488bdf7749650b52cf309` as a reliability example. Task 009 adds the F2–F6 menus, provider/model switching with independent conversations, and saved preferences (sections 4b, 4c, 11 switching, 13 writes; Python `ui/menu.py`, `tui.py`, `preferences.py`, `session.py`, Go `internal/tui/{menu,controls,operation}.go` and their tests). Pricing (section 15) is **not** implemented.
+The DOS-style fullscreen chat (the completed `0.3.0` TUI milestone; `0.4.0` adds the estimated cost). Reference: Python `docs/tui-spec.md` sections 1–10, 11 (restore/save/reset/cleanup), 14 (fullscreen streaming) and 16, at commit `0a6d045c022b850371a1c51a1df30f11d9d4c60e`; Go `internal/tui` at `b064decc66cad7d9656488bdf7749650b52cf309` as a reliability example. Task 009 adds the F2–F6 menus, provider/model switching with independent conversations, and saved preferences (sections 4b, 4c, 11 switching, 13 writes; Python `ui/menu.py`, `tui.py`, `preferences.py`, `session.py`, Go `internal/tui/{menu,controls,operation}.go` and their tests). Pricing (section 15) is **not** implemented.
 
 ## When it starts
 

@@ -1,6 +1,6 @@
 # Architecture
 
-Status: `0.4.0-dev` (exact estimated API costs, Task 010, and the consolidated Python/Go/TypeScript compatibility gate and release audit, Task 011 — `docs/parity.md`, `docs/release-audit.md`; the pure `src/pricing/` module, `/usage` and the `COST (EST.)` panel, `docs/pricing.md`; not a release). The last completed milestone is `0.3.0` (the TUI milestone is complete after the owner smoke tests: the fullscreen chat, Task 008, and its menus with provider/model switching and saved preferences, Task 009; the `0.2.0` milestone — plain chat, history, streaming — was completed after the owner smoke tests). The completed CLI Foundation (`0.1.0`: non-streaming OpenAI and Ollama one-shot) is behavior-preserved; the plain chat with persistent history and read-only saved settings is connected (Task 006) and `--stream` is implemented for both providers and both front ends (Task 007). No tag or release has been created or published.
+Status: `0.4.0` (the completed full-parity milestone: exact estimated API costs, Task 010, and the consolidated Python/Go/TypeScript compatibility gate and release audit, Task 011 — `docs/parity.md`, `docs/release-audit.md`; the pure `src/pricing/` module, `/usage` and the `COST (EST.)` panel, `docs/pricing.md`; no Git tag or release has been created). The previous completed milestone was `0.3.0` (the TUI milestone is complete after the owner smoke tests: the fullscreen chat, Task 008, and its menus with provider/model switching and saved preferences, Task 009; the `0.2.0` milestone — plain chat, history, streaming — was completed after the owner smoke tests). The completed CLI Foundation (`0.1.0`: non-streaming OpenAI and Ollama one-shot) is behavior-preserved; the plain chat with persistent history and read-only saved settings is connected (Task 006) and `--stream` is implemented for both providers and both front ends (Task 007). No tag or release has been created or published.
 
 ## CLI composition
 
@@ -158,7 +158,7 @@ Layers (dependencies point downward; nothing below knows the layers above):
 | Work on chat/history/streaming | 0.2.0-dev (done) |
 | Completed interactive chat milestone | 0.2.0 (done) |
 | TUI development / completed TUI | 0.3.0-dev (done) / 0.3.0 (done) |
-| Cost estimates / full parity development / completed milestone | 0.4.0-dev (current) / 0.4.0 |
+| Cost estimates / full parity development / completed milestone | 0.4.0-dev (done) / 0.4.0 (current) |
 
 Patch releases of a completed milestone (0.1.x) require owner approval.
 

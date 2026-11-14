@@ -1,6 +1,6 @@
 # Release audit (Task 011)
 
-Version `0.4.0-dev`. This is an audit of what is implemented and verified, not a release: no tag, commit or publication has been made, and finalizing `0.4.0` needs a separate owner instruction.
+Version `0.4.0` (the completed full-parity milestone; Task 011 audit accepted after review). This documents what is implemented and verified; no Git tag, release or publication has been made.
 
 ## Implemented scope
 
@@ -33,6 +33,6 @@ Version `0.4.0-dev`. This is an audit of what is implemented and verified, not a
 - Counts above signed 64 bits are exact in TypeScript and Python but unreadable for Go (documented in `docs/parity.md`); Go's JSON writer escapes U+2028/U+2029.
 - The Go reference's module dependencies must already be in the local module cache for the cross-language gate; otherwise it is BLOCKED.
 
-## Remaining blockers for a `0.4.0` release
+## Remaining blockers
 
-None found by the gate. Release steps (version change, commit, tag, publication) are owner decisions outside this task.
+None found by the gate. Tagging and publication are owner decisions.

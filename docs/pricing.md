@@ -1,6 +1,6 @@
 # Estimated API costs
 
-Version `0.4.0-dev` (Task 010). The completed milestone is `0.3.0` (TUI). Costs are **estimates**, never billed amounts, and are computed from the stored usage records; nothing about cost is persisted (no cost or catalog field in `settings.json`, `active.json` or conversation files) and nothing is fetched at run time (no price refresh, billing or account access).
+Version `0.4.0` (Task 010 added the estimates; the previous milestone was `0.3.0`, TUI). Costs are **estimates**, never billed amounts, and are computed from the stored usage records; nothing about cost is persisted (no cost or catalog field in `settings.json`, `active.json` or conversation files) and nothing is fetched at run time (no price refresh, billing or account access).
 
 ## The catalog is a dated reference snapshot
 
